@@ -1,0 +1,8 @@
+version = "0"
+meta_type = "Patch"
+
+[vertex_colors]
+included = false
+
+[height_map]
+conflict_strategy = "Resolve"

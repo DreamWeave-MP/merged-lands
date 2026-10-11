@@ -1,0 +1,11 @@
+version = "0"
+meta_type = "Patch"
+
+[height_map]
+conflict_strategy = "Ignore"
+
+[texture_indices]
+conflict_strategy = "Resolve"
+
+[world_map_data]
+included = false

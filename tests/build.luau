@@ -1,0 +1,238 @@
+--!strict
+-- The plugins the Merged Lands goldens were made from, built with `@tes3` into the data folder
+-- given: Base.esm, then Hills.esp and Valleys.esp, each naming Base.esm as its master.
+local tes3 = require '@tes3'
+
+local Vertices = 65 * 65
+
+-- A LAND's parts, each as a function of where in the cell it is. One without a function is left
+-- out of the record.
+type Parts = {
+  height: ((column: number, row: number) -> number)?,
+  color: ((column: number, row: number) -> (number, number, number))?,
+  texture: ((column: number, row: number) -> number)?,
+  worldMap: ((index: number) -> number)?,
+}
+
+type Terrain = {
+  flags: number,
+  heightOffset: number?,
+  heights: buffer?,
+  normals: buffer?,
+  colors: buffer?,
+  textures: buffer?,
+  worldMap: buffer?,
+}
+
+-- A LAND whose heights are `height(column, row)` in steps of 8 units, with its other parts from the
+-- functions given.
+local function land(plugin: tes3.Plugin, grid: { number }, parts: Parts)
+  local index = plugin:count()
+  plugin:insertValue(index, { type = 'Landscape', grid = grid })
+
+  local terrain: Terrain = { flags = 8 }
+
+  local height = parts.height
+  if height then
+    local offset = height(0, 0)
+    local steps, slopes = buffer.create(Vertices * 4), buffer.create(Vertices * 3)
+    for row = 0, 64 do
+      for column = 0, 64 do
+        local vertex = row * 65 + column
+        buffer.writei32(steps, vertex * 4, height(column, row) - offset)
+        buffer.writei8(slopes, vertex * 3, (column * 3) % 40 - 20)
+        buffer.writei8(slopes, vertex * 3 + 2, 120)
+      end
+    end
+
+    terrain.heightOffset, terrain.heights, terrain.normals = offset, steps, slopes
+    terrain.flags += 1
+  end
+
+  local color = parts.color
+  if color then
+    local painted = buffer.create(Vertices * 3)
+    for vertex = 0, Vertices - 1 do
+      local red, green, blue = color(vertex % 65, vertex // 65)
+      buffer.writeu8(painted, vertex * 3, red)
+      buffer.writeu8(painted, vertex * 3 + 1, green)
+      buffer.writeu8(painted, vertex * 3 + 2, blue)
+    end
+
+    terrain.colors = painted
+    terrain.flags += 2
+  end
+
+  local texture = parts.texture
+  if texture then
+    local indices = buffer.create(512)
+    for square = 0, 255 do
+      buffer.writeu16(indices, square * 2, texture(square % 16, square // 16))
+    end
+
+    terrain.textures = indices
+    terrain.flags += 4
+  end
+
+  local worldMap = buffer.create(81)
+  local mapped = parts.worldMap
+  for square = 0, 80 do
+    buffer.writei8(worldMap, square, if mapped then mapped(square) else 0)
+  end
+
+  terrain.worldMap = worldMap
+  tes3.land.write(plugin, index, terrain)
+end
+
+local function texture(plugin: tes3.Plugin, id: string, index: number, fileName: string)
+  plugin:insertValue(
+    plugin:count(),
+    { type = 'LandscapeTexture', id = id, index = index, fileName = fileName }
+  )
+end
+
+--- An empty plugin by `test`, naming `masters`.
+local function new(fileType: tes3.FileType, masters: { { name: string, size: number } }?): tes3.Plugin
+  local plugin = tes3.new(fileType)
+  plugin:setAuthor 'test'
+  if masters then plugin:setMasters(masters) end
+
+  return plugin
+end
+
+-- Rolling ground, the same wherever two cells meet.
+local function ground(cellX: number, cellY: number): (column: number, row: number) -> number
+  return function(column: number, row: number): number
+    local worldX, worldY = cellX * 64 + column, cellY * 64 + row
+    return 40 + (worldX * 3 + worldY * 2) % 50
+  end
+end
+
+local function earth(column: number, row: number): (number, number, number)
+  return 90 + column, 80 + row, 60
+end
+
+local function worldMap(index: number): number return index % 9 + 1 end
+
+return function(dataFolder: string)
+  local function save(plugin: tes3.Plugin, name: string)
+    plugin:updateRecordCount()
+    jess.fs.write(jess.fs.join(dataFolder, name), plugin:save())
+  end
+
+  local function after(name: string): { { name: string, size: number } }
+    return { { name = name, size = assert(jess.fs.size(jess.fs.join(dataFolder, name))) } }
+  end
+
+  local base = new 'master'
+  texture(base, 'Sand', 0, 'tx_sand.dds')
+  texture(base, 'Grass', 1, 'tx_grass.dds')
+  texture(base, 'Rock', 2, 'tx_rock.dds')
+  texture(base, 'Snow', 3, 'tx_snow.dds')
+
+  for cellY = 0, 1 do
+    for cellX = 0, 1 do
+      land(base, { cellX, cellY }, {
+        height = ground(cellX, cellY),
+        color = earth,
+        texture = function(column: number, row: number): number return (column + row) % 3 + 1 end,
+        worldMap = worldMap,
+      })
+    end
+  end
+
+  -- Only the master has these. Ground that's never at 0 stays as it is, and so does Snow, which
+  -- only it uses. Ground at 0 in a single vertex is still written, because the original drops the
+  -- normal under a height of exactly 0, and without a WNAM, because its world map is all 0.
+  land(base, { 5, 5 }, {
+    height = ground(5, 5),
+    color = earth,
+    texture = function(): number return 4 end,
+    worldMap = worldMap,
+  })
+
+  land(base, { 8, 0 }, {
+    height = function(column: number, row: number): number
+      return if column == 10 and row == 10 then 0 else 20
+    end,
+    texture = function(): number return 2 end,
+  })
+
+  save(base, 'Base.esm')
+
+  -- Hills raises the west of (0, 0), recolors (1, 0), and paints (0, 1) with textures it numbers
+  -- its own way, plus one it never defines.
+  local hills = new('plugin', after 'Base.esm')
+  texture(hills, 'Rock', 0, 'tx_rock.dds')
+  texture(hills, 'Mud', 1, 'tx_mud.dds')
+
+  land(hills, { 0, 0 }, {
+    height = function(column: number, row: number): number
+      local height = ground(0, 0)(column, row)
+      if column > 2 and column < 20 and row > 2 and row < 60 then return height + 30 end
+
+      return height
+    end,
+    color = earth,
+    texture = function(column: number, row: number): number return (column + row) % 3 + 1 end,
+    worldMap = worldMap,
+  })
+
+  land(hills, { 1, 0 }, {
+    height = ground(1, 0),
+    color = function(column: number, row: number): (number, number, number)
+      return 200, 40 + column, 40 + row
+    end,
+    texture = function(column: number, row: number): number return (column + row) % 3 + 1 end,
+    worldMap = worldMap,
+  })
+
+  land(hills, { 0, 1 }, {
+    height = ground(0, 1),
+    color = earth,
+    texture = function(column: number, row: number): number
+      if column < 8 then return 2 end
+      if row < 4 then return 9 end
+
+      return 1
+    end,
+    worldMap = worldMap,
+  })
+
+  save(hills, 'Hills.esp')
+
+  -- Valleys was made against Base alone: it lowers the east of (0, 0), overlapping Hills, lifts the
+  -- edge (1, 1) shares with (1, 0), renames Grass's texture, and adds a cell nobody else has.
+  local valleys = new('plugin', after 'Base.esm')
+  texture(valleys, 'Grass', 0, 'tx_grass_lush.dds')
+  texture(valleys, 'Sand', 1, 'tx_sand.dds')
+
+  land(valleys, { 0, 0 }, {
+    height = function(column: number, row: number): number
+      local height = ground(0, 0)(column, row)
+      if column > 15 and column < 50 and row > 10 and row < 30 then return height - 25 end
+
+      return height
+    end,
+    color = earth,
+    texture = function(column: number, row: number): number return (column + row) % 2 + 1 end,
+    worldMap = function(index: number): number return index % 7 + 2 end,
+  })
+
+  land(valleys, { 1, 1 }, {
+    height = function(column: number, row: number): number
+      local height = ground(1, 1)(column, row)
+      if row < 3 then return height + 12 end
+
+      return height
+    end,
+    color = function(column: number, row: number): (number, number, number)
+      return 90 + column, 80 + row, 60 + (column * row) % 30
+    end,
+    texture = function(column: number, row: number): number return (column + row) % 3 + 1 end,
+    worldMap = worldMap,
+  })
+
+  land(valleys, { 9, 9 }, { height = ground(9, 9), texture = function(): number return 1 end })
+  save(valleys, 'Valleys.esp')
+end
