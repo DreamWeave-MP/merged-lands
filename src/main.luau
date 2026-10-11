@@ -1,0 +1,6 @@
+--!strict
+--!native
+-- The `merged-lands` command target's entry: the command line's arguments in, the exit status out.
+local cli = require '@merged-lands/cli'
+
+return cli.run { ... }
