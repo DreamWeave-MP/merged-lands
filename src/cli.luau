@@ -8,7 +8,7 @@
   configuration(command, environment) -> (openmw.cfg, nil) | (nil, message)
 
   merged-lands --openmw-cfg <path> [--output-file <name>] [--output-file-dir <dir>]
-               [--sort-order default|none] [<plugin>...]
+               [--sort-order default|none] [--activate] [<plugin>...]
   merged-lands --help | --version
 
 The flags are the original's (the `#[arg]`s of its `src/main.rs`), each onto the
@@ -29,13 +29,18 @@ and merged_lands.toml is read from beside openmw.cfg), `--vanilla` and `--data-f
 the OpenMW mode, the only one), `--stack-size-mb`, `--add-debug-vertex-colors`, and
 `--wait-for-exit`.
 
+One flag is the port's own, not the original's: `--activate` is the tool's `activate`, which adds
+the plugin to openmw.cfg's content and saves it, backing it up first, when the plugin is where
+OpenMW can load it. The original enables nothing, and without the flag neither does this. It is a
+switch: it takes no value, and is given once.
+
 `parse` reads an argument list into the command it names without running it, or says what it
 couldn't read. `configuration` is the openmw.cfg a command reads, `environment` being
 OPENMW_CONFIG's value. What a merge prints is the tool's own line for it.
 
 Exit statuses: 0 when the command did what it was asked, 8 when the command line can't be used (an
-unknown or unported flag, a missing or repeated value, no configuration, or one that isn't there),
-9 when the merge raised. Messages go to standard error as `merged-lands: <message>`.
+unknown or unported flag, a missing or repeated value, a value for a switch, no configuration, or
+one that isn't there), 9 when the merge raised. Messages go to standard error as `merged-lands: <message>`.
 ]]
 
 local fs = require '@dream/fs'
@@ -49,6 +54,7 @@ export type Options = {
   outputDir: string?,
   plugins: { string }?,
   sortOrder: ('default' | 'none')?,
+  activate: boolean?,
 }
 
 --- A command line, read: for a merge, the configuration it names, if it names one, and the
@@ -65,7 +71,7 @@ local Usage = [[
 merged-lands: Merged Lands for an OpenMW load order
 
   merged-lands --openmw-cfg <path> [--output-file <name>] [--output-file-dir <dir>]
-               [--sort-order default|none] [<plugin>...]
+               [--sort-order default|none] [--activate] [<plugin>...]
   merged-lands --help | --version
 
 Merges the load order's LAND records and writes what then differs from what OpenMW would load
@@ -81,6 +87,10 @@ anyway, with the LTEX records it uses, as one plugin that belongs last in the lo
                            oldest first; none: as given, and the masters in load order
   -h, --help               print this
   -V, --version            print which Merged Lands this is
+
+This port's own, not the original's:
+  --activate               add the plugin to openmw.cfg's content and save it, backing it up
+                           first; a plugin written outside the data folders is left disabled
 
 Not ported, and refused: --merged-lands-dir, --log-file, --log-level, --vanilla,
 --data-files-dir, --stack-size-mb, --add-debug-vertex-colors, --wait-for-exit.
@@ -152,6 +162,14 @@ local function parse(argv: { string }): (Command?, string?)
 
     local unported = Unported[name]
     if unported then return nil, `{name} isn't ported: {unported}` end
+
+    if name == '--activate' then
+      if attached then return nil, '--activate takes no value' end
+      if options.activate then return nil, '--activate can only be given once' end
+
+      options.activate = true
+      continue
+    end
 
     local valued = Valued[name]
     if not valued then return nil, `unknown option '{argument}'` end

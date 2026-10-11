@@ -30,9 +30,9 @@ exports = ["@merged-lands", "@merged-lands/cli"]
 # openmw.cfg and the configurations it includes, merged_lands.toml beside it, the data folders'
 # listings, the content files with their sizes and dates, and their `.mergedlands.toml` patch
 # files (filesystem.read); it makes the output folder, removes the plugin and patch file an
-# earlier run left there, and writes the plugin (filesystem.write); and it reads OPENMW_CONFIG
-# when no flag names the configuration (process.environment). It runs no other program and opens
-# no connection.
+# earlier run left there, writes the plugin, and with --activate backs up and rewrites openmw.cfg
+# (filesystem.write); and it reads OPENMW_CONFIG when no flag names the configuration
+# (process.environment). It runs no other program and opens no connection.
 
 [targets.merged-lands]
 kind = "command"

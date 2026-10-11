@@ -47,6 +47,8 @@ local Flags: { { argv: { string }, command: cli.Command } } = {
     argv = { 'Base.esm', 'Hills.esp' },
     command = { action = 'merge', options = { plugins = { 'Base.esm', 'Hills.esp' } } },
   },
+  -- The port's own flag: the original has none for enabling its plugin.
+  { argv = { '--activate' }, command = { action = 'merge', options = { activate = true } } },
 }
 
 -- The original's flags the port has nothing for, and the reason each is refused with.
@@ -76,7 +78,15 @@ local Unported: { { flag: string, reason: string } } = {
 -- Each other argument list `parse` refuses, and what it says of it.
 local Refused: { { argv: { string }, message: string } } = {
   { argv = { '--bogus' }, message = 'unknown option \'--bogus\'' },
-  { argv = { '--activate' }, message = 'unknown option \'--activate\'' },
+  { argv = { '--Activate' }, message = 'unknown option \'--Activate\'' },
+  { argv = { '--enable' }, message = 'unknown option \'--enable\'' },
+  { argv = { '--activate=true' }, message = '--activate takes no value' },
+  { argv = { 'Base.esm', '--activate=' }, message = '--activate takes no value' },
+  { argv = { '--activate', '--activate' }, message = '--activate can only be given once' },
+  {
+    argv = { '--activate', 'Base.esm', '--sort-order', 'none', '--activate' },
+    message = '--activate can only be given once',
+  },
   { argv = { '--outputfile', 'Terrain.omwaddon' }, message = 'unknown option \'--outputfile\'' },
   { argv = { '--Output-File', 'Terrain.omwaddon' }, message = 'unknown option \'--Output-File\'' },
   { argv = { '-o', 'Terrain.omwaddon' }, message = 'unknown option \'-o\'' },
@@ -161,6 +171,7 @@ suite.describe('parse', function()
       'out dir',
       '--sort-order',
       'none',
+      '--activate',
       'Base.esm',
       'Hills.esp',
     }
@@ -172,9 +183,26 @@ suite.describe('parse', function()
         outputFile = 'Terrain.omwaddon',
         outputDir = 'out dir',
         sortOrder = 'none',
+        activate = true,
         plugins = { 'Base.esm', 'Hills.esp' },
       },
     }
+  end)
+
+  suite.it('reads --activate as a switch: what follows it is a plugin, not its value', function()
+    expect(cli.parse { '--activate', 'true' }).toEqual {
+      action = 'merge',
+      options = { activate = true, plugins = { 'true' } },
+    }
+
+    expect(cli.parse { 'Base.esm', '--activate', '--output-file', 'Terrain.omwaddon' }).toEqual {
+      action = 'merge',
+      options = { activate = true, outputFile = 'Terrain.omwaddon', plugins = { 'Base.esm' } },
+    }
+
+    -- Without the flag the option is left unset, and the tool enables nothing.
+    local command = assert(cli.parse { 'Base.esm' })
+    expect(assert(command.options).activate).toBeNil()
   end)
 
   suite.it('takes a value after an equals sign, as the original does', function()
@@ -365,6 +393,55 @@ suite.describe('run', function()
     -- Again by the folder, under jess's spelling: the run leaves its own output out of the merge.
     expect(cli.run { '--config', order.config }).toBe(0)
     support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+    expect(jess.fs.read(order.file)).toBe(before)
+    expect(jess.fs.list(order.config)).toEqual { 'openmw.cfg' }
+  end)
+
+  suite.it('with --activate, adds the plugin to openmw.cfg once, backing it up first', function()
+    local order = support.order 'cli-activate'
+    local output = jess.fs.join(order.out, OutputName)
+    local before = assert(jess.fs.read(order.file))
+    local backup = jess.fs.join(order.config, 'openmw.cfg.bak')
+
+    expect(cli.run { '--openmw-cfg', order.file, '--activate' }).toBe(0)
+    support.expectOriginal(output, 'default')
+
+    local enabled = assert(jess.fs.read(order.file))
+    expect(enabled).toBe(`{before}content={OutputName}\n`)
+    expect(jess.fs.read(backup)).toBe(before)
+
+    local saved = jess.fs.list(order.config)
+    table.sort(saved)
+    expect(saved).toEqual { 'openmw.cfg', 'openmw.cfg.bak' }
+
+    -- The next run finds the plugin already active: it leaves its own output out of the merge,
+    -- writes the same plugin, and neither rewrites openmw.cfg nor backs it up again.
+    expect(cli.run { '--activate', '--config', order.config }).toBe(0)
+    support.expectOriginal(output, 'default')
+    expect(jess.fs.read(order.file)).toBe(enabled)
+    expect(jess.fs.read(backup)).toBe(before)
+
+    local kept = jess.fs.list(order.config)
+    table.sort(kept)
+    expect(kept).toEqual { 'openmw.cfg', 'openmw.cfg.bak' }
+  end)
+
+  suite.it('with --activate, leaves disabled a plugin written where OpenMW can\'t load it', function()
+    local order = support.order 'cli-activate-elsewhere'
+    local elsewhere = jess.fs.join(order.root, 'elsewhere')
+    local before = assert(jess.fs.read(order.file))
+
+    expect(cli.run {
+      '--openmw-cfg',
+      order.file,
+      '--activate',
+      '--output-file-dir',
+      elsewhere,
+    }).toBe(0)
+
+    support.expectOriginal(jess.fs.join(elsewhere, OutputName), 'default')
+    expect(jess.fs.read(order.file)).toBe(before)
+    expect(jess.fs.list(order.config)).toEqual { 'openmw.cfg' }
   end)
 
   suite.it('merges with patch files into the original\'s plugin', function()
