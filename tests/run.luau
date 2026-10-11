@@ -26,6 +26,7 @@ type Report = {
 }
 
 local OutputName = 'Merged Lands.omwaddon'
+local Vertices = 65 * 65
 
 --- Merges the load order as its openmw.cfg stands, with `options` as `state.mergedlands`.
 local function merge(order: support.Order, options: { [string]: unknown }): Report
@@ -126,6 +127,83 @@ suite.describe('merging', function()
 
   suite.it('needs a Context', function()
     expect(function() mergedLands({}, nil) end).toThrow 'merged-lands needs an OpenMW config'
+  end)
+end)
+
+-- What the original's goldens don't reach: the content the merge leaves out, and the record
+-- flags it reads off a plugin's records.
+suite.describe('reading the load order', function()
+  suite.it('skips content that has no file, won\'t open, or holds no records', function()
+    local content = table.clone(support.Standard)
+    table.insert(content, 2, 'Scripts.omwscripts')
+    table.insert(content, 'Broken.esp')
+    table.insert(content, 'Missing.esp')
+
+    local order = support.order('skipped', nil, content)
+    jess.fs.write(jess.fs.join(order.data, 'Scripts.omwscripts'), 'PLAYER: scripts/player.lua\n')
+    jess.fs.write(jess.fs.join(order.data, 'Broken.esp'), 'not a plugin')
+
+    local report = merge(order, {})
+    expect(report.plugins).toBe(3)
+    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+  end)
+
+  suite.it('carries a LAND\'s record flags into the plugin', function()
+    local order = support.order('flagged', nil, { 'Flagged.esm' })
+
+    -- One vertex at a height of exactly 0, which the original writes a cell for.
+    local heights, normals = buffer.create(Vertices * 4), buffer.create(Vertices * 3)
+    buffer.writei32(heights, (10 * 65 + 10) * 4, -20)
+    for vertex = 0, Vertices - 1 do
+      buffer.writei8(normals, vertex * 3 + 2, 120)
+    end
+
+    local flagged = tes3.new 'master'
+    flagged:insertValue(1, { type = 'Landscape', grid = { 3, -2 }, flags = 'PERSISTENT' })
+    tes3.land.write(flagged, 1, {
+      flags = 9,
+      heightOffset = 20,
+      heights = heights,
+      normals = normals,
+      worldMap = false,
+    })
+
+    flagged:updateRecordCount()
+    jess.fs.write(jess.fs.join(order.data, 'Flagged.esm'), flagged:save())
+
+    local report = merge(order, {})
+    expect(report.lands).toBe(1)
+    expect(report.masters).toEqual { 'Flagged.esm' }
+
+    local merged = tes3.open(assert(jess.fs.readBuffer(report.output :: string)))
+    expect(merged:count()).toBe(2)
+    expect(merged:tag(1)).toBe 'LAND'
+    expect(tes3.land.read(merged, 1, {}).grid).toEqual { 3, -2 }
+    expect(tes3.records.headerFlags(merged, 1)).toEqual {
+      value = 0x400,
+      deleted = false,
+      persistent = true,
+      ignored = false,
+      blocked = false,
+    }
+  end)
+
+  suite.it('stops on a deleted LTEX nothing defined before', function()
+    local order = support.order('deleted', nil, { 'Deleted.esp' })
+    local deleted = tes3.new()
+    deleted:insertValue(1, {
+      type = 'LandscapeTexture',
+      id = 'Gone',
+      index = 0,
+      fileName = 'tx_gone.dds',
+      flags = 'DELETED',
+    })
+
+    deleted:updateRecordCount()
+    jess.fs.write(jess.fs.join(order.data, 'Deleted.esp'), deleted:save())
+
+    expect(function() merge(order, {}) end).toThrow 'merged-lands: Deleted.esp adds the deleted LTEX Gone, as the original won\'t'
+    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
   end)
 end)
 
