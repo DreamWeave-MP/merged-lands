@@ -90,7 +90,7 @@ Exit status: 0 done, 8 the command line can't be used, 9 the merge failed.]]
 local Version = 'merged-lands: Merged Lands 0.2.0, ported to Luau'
 
 -- The flags that take a value, by what the value is. Two spellings of one field are one flag.
-local Valued: { [string]: { field: string, value: string } } = table.freeze {
+local Valued: { [string]: { field: string, value: string } } = {
   ['--openmw-cfg'] = { field = 'config', value = 'an openmw.cfg or its folder' },
   ['--config'] = { field = 'config', value = 'an openmw.cfg or its folder' },
   ['--output-file'] = { field = 'outputFile', value = 'a file name' },
@@ -99,7 +99,7 @@ local Valued: { [string]: { field: string, value: string } } = table.freeze {
 }
 
 -- The original's flags for what the port doesn't do, and why each has nothing to set.
-local Unported: { [string]: string } = table.freeze {
+local Unported: { [string]: string } = {
   ['--merged-lands-dir'] = 'no Conflicts images or log are written, and merged_lands.toml is read from beside openmw.cfg',
   ['--log-file'] = 'no log file is written',
   ['--log-level'] = 'no log file is written',
