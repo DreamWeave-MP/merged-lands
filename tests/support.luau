@@ -54,7 +54,7 @@ local function order(name: string, patches: { string }?, content: { string }?): 
   local scratch = assert(rawget(_G, 'scratchRoot') :: string?, 'the suite needs a scratchRoot')
   local root = jess.fs.join(scratch, name)
 
-  -- Each provider runs the suite, so a load order may be left over from the one before.
+  -- A load order starts from nothing, whatever an earlier one of its name left behind.
   if jess.fs.isDir(root) then io(fs.remove(root, { recursive = true })) end
 
   local made: Order = {

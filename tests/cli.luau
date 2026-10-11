@@ -1,0 +1,411 @@
+--!strict
+--!native
+-- `@merged-lands/cli`: the argument lists it reads into `state.mergedlands`, the ones it refuses
+-- and why, the configuration a command reads, and the exit status of each way a command can end,
+-- a finished merge held to the original's plugin included. Its messages go to the suite's own
+-- standard error.
+local cli = require '@merged-lands/cli'
+local process = require '@dream/process'
+local support = require './support'
+local test = require '@jess/test'
+
+local expect = test.expect
+local suite = test.new()
+
+local OutputName = 'Merged Lands.omwaddon'
+
+local NoConfiguration =
+  'an OpenMW configuration is required: name the openmw.cfg or its folder with --openmw-cfg (or --config), or in OPENMW_CONFIG'
+
+-- Each flag that sets something, and the one thing it sets.
+local Flags: { { argv: { string }, command: cli.Command } } = {
+  {
+    argv = { '--openmw-cfg', 'openmw.cfg' },
+    command = { action = 'merge', config = 'openmw.cfg', options = {} },
+  },
+  {
+    argv = { '--config', 'openmw.cfg' },
+    command = { action = 'merge', config = 'openmw.cfg', options = {} },
+  },
+  {
+    argv = { '--output-file', 'Terrain.omwaddon' },
+    command = { action = 'merge', options = { outputFile = 'Terrain.omwaddon' } },
+  },
+  {
+    argv = { '--output-file-dir', 'out dir' },
+    command = { action = 'merge', options = { outputDir = 'out dir' } },
+  },
+  {
+    argv = { '--sort-order', 'none' },
+    command = { action = 'merge', options = { sortOrder = 'none' } },
+  },
+  {
+    argv = { '--sort-order', 'default' },
+    command = { action = 'merge', options = { sortOrder = 'default' } },
+  },
+  {
+    argv = { 'Base.esm', 'Hills.esp' },
+    command = { action = 'merge', options = { plugins = { 'Base.esm', 'Hills.esp' } } },
+  },
+}
+
+-- The original's flags the port has nothing for, and the reason each is refused with.
+local Unported: { { flag: string, reason: string } } = {
+  {
+    flag = '--merged-lands-dir',
+    reason = 'no Conflicts images or log are written, and merged_lands.toml is read from beside openmw.cfg',
+  },
+  { flag = '--log-file', reason = 'no log file is written' },
+  { flag = '--log-level', reason = 'no log file is written' },
+  { flag = '--vanilla', reason = 'this is the OpenMW mode, and the only one' },
+  {
+    flag = '--data-files-dir',
+    reason = 'it is --vanilla\'s, and this is the OpenMW mode, the only one',
+  },
+  {
+    flag = '--stack-size-mb',
+    reason = 'the merge has no thread of its own to size a stack for',
+  },
+  {
+    flag = '--add-debug-vertex-colors',
+    reason = 'the merge colors no vertices to show conflicts',
+  },
+  { flag = '--wait-for-exit', reason = 'the command never waits for a key' },
+}
+
+-- Each other argument list `parse` refuses, and what it says of it.
+local Refused: { { argv: { string }, message: string } } = {
+  { argv = { '--bogus' }, message = 'unknown option \'--bogus\'' },
+  { argv = { '--activate' }, message = 'unknown option \'--activate\'' },
+  { argv = { '--outputfile', 'Terrain.omwaddon' }, message = 'unknown option \'--outputfile\'' },
+  { argv = { '--Output-File', 'Terrain.omwaddon' }, message = 'unknown option \'--Output-File\'' },
+  { argv = { '-o', 'Terrain.omwaddon' }, message = 'unknown option \'-o\'' },
+  { argv = { '-c', 'openmw.cfg' }, message = 'unknown option \'-c\'' },
+  { argv = { '--help=all' }, message = 'unknown option \'--help=all\'' },
+  { argv = { 'Base.esm', '--bogus=1' }, message = 'unknown option \'--bogus=1\'' },
+  { argv = { '--openmw-cfg' }, message = '--openmw-cfg requires an openmw.cfg or its folder' },
+  { argv = { '--config' }, message = '--config requires an openmw.cfg or its folder' },
+  { argv = { '--output-file' }, message = '--output-file requires a file name' },
+  { argv = { 'Base.esm', '--output-file-dir' }, message = '--output-file-dir requires a folder' },
+  { argv = { '--sort-order' }, message = '--sort-order requires default or none' },
+  {
+    argv = { '--sort-order', 'date' },
+    message = '--sort-order takes default or none, not \'date\'',
+  },
+  {
+    argv = { '--sort-order=None' },
+    message = '--sort-order takes default or none, not \'None\'',
+  },
+  { argv = { '--sort-order=' }, message = '--sort-order takes default or none, not \'\'' },
+  {
+    argv = { '--output-file', 'First.omwaddon', '--output-file=Second.omwaddon' },
+    message = '--output-file can only be given once',
+  },
+  {
+    argv = { '--output-file-dir', 'first', 'Base.esm', '--output-file-dir', 'second' },
+    message = '--output-file-dir can only be given once',
+  },
+  {
+    argv = { '--sort-order', 'none', '--sort-order', 'none' },
+    message = '--sort-order can only be given once',
+  },
+  {
+    argv = { '--openmw-cfg', 'first', '--openmw-cfg', 'second' },
+    message = '--openmw-cfg can only be given once',
+  },
+  {
+    argv = { '--openmw-cfg', 'first', '--config', 'second' },
+    message = '--openmw-cfg and --config both name the configuration; give one',
+  },
+  {
+    argv = { '--config=first', '--openmw-cfg=second' },
+    message = '--config and --openmw-cfg both name the configuration; give one',
+  },
+}
+
+for _, unported in Unported do
+  local message = `{unported.flag} isn't ported: {unported.reason}`
+  table.insert(Refused, { argv = { unported.flag }, message = message })
+  table.insert(Refused, { argv = { `{unported.flag}=value` }, message = message })
+  table.insert(Refused, { argv = { 'Base.esm', unported.flag, 'value' }, message = message })
+end
+
+-- The original refuses --vanilla beside --openmw-cfg; here --vanilla alone is already refused.
+table.insert(Refused, {
+  argv = { '--openmw-cfg', 'openmw.cfg', '--vanilla' },
+  message = '--vanilla isn\'t ported: this is the OpenMW mode, and the only one',
+})
+
+suite.describe('parse', function()
+  suite.it('reads no arguments as a merge with every option left to the tool', function()
+    local command, message = cli.parse {}
+    expect(command).toEqual { action = 'merge', options = {} }
+    expect(message).toBeNil()
+  end)
+
+  suite.it('maps each flag onto its option, and sets no other', function()
+    for _, case in Flags do
+      local command, message = cli.parse(case.argv)
+      expect(command).toEqual(case.command)
+      expect(message).toBeNil()
+    end
+  end)
+
+  suite.it('maps every flag at once', function()
+    local command = cli.parse {
+      '--openmw-cfg',
+      'config dir',
+      '--output-file',
+      'Terrain.omwaddon',
+      '--output-file-dir',
+      'out dir',
+      '--sort-order',
+      'none',
+      'Base.esm',
+      'Hills.esp',
+    }
+
+    expect(command).toEqual {
+      action = 'merge',
+      config = 'config dir',
+      options = {
+        outputFile = 'Terrain.omwaddon',
+        outputDir = 'out dir',
+        sortOrder = 'none',
+        plugins = { 'Base.esm', 'Hills.esp' },
+      },
+    }
+  end)
+
+  suite.it('takes a value after an equals sign, as the original does', function()
+    local command = cli.parse {
+      '--config=openmw.cfg',
+      '--output-file=Terrain.omwaddon',
+      '--output-file-dir=out=dir',
+      '--sort-order=default',
+    }
+
+    expect(command).toEqual {
+      action = 'merge',
+      config = 'openmw.cfg',
+      options = { outputFile = 'Terrain.omwaddon', outputDir = 'out=dir', sortOrder = 'default' },
+    }
+  end)
+
+  suite.it('takes plugins on either side of the flags, in the order given', function()
+    local command = cli.parse { 'Base.esm', '--sort-order', 'none', 'Hills.esp', 'Valleys.esp' }
+    expect(command).toEqual {
+      action = 'merge',
+      options = { sortOrder = 'none', plugins = { 'Base.esm', 'Hills.esp', 'Valleys.esp' } },
+    }
+  end)
+
+  suite.it('takes what follows a flag and what follows -- as they are spelled', function()
+    expect(cli.parse { '--', '--vanilla', '--bogus' }).toEqual {
+      action = 'merge',
+      options = { plugins = { '--vanilla', '--bogus' } },
+    }
+
+    expect(cli.parse { 'Base.esm', '--', '-Hills.esp' }).toEqual {
+      action = 'merge',
+      options = { plugins = { 'Base.esm', '-Hills.esp' } },
+    }
+
+    expect(cli.parse { '--output-file', '--sort-order', '-' }).toEqual {
+      action = 'merge',
+      options = { outputFile = '--sort-order', plugins = { '-' } },
+    }
+  end)
+
+  suite.it('reads help and version under each spelling, wherever they are', function()
+    for _, spelling in { '-h', '--help' } do
+      expect(cli.parse { spelling }).toEqual { action = 'help' }
+      expect(cli.parse { 'Base.esm', '--sort-order', 'none', spelling, '--bogus' }).toEqual {
+        action = 'help',
+      }
+    end
+
+    for _, spelling in { '-V', '--version' } do
+      expect(cli.parse { spelling }).toEqual { action = 'version' }
+      expect(cli.parse { '--output-file', 'Terrain.omwaddon', spelling }).toEqual {
+        action = 'version',
+      }
+    end
+  end)
+
+  suite.it('refuses each of the original\'s flags the port has nothing for, by name', function()
+    for _, unported in Unported do
+      local command, message = cli.parse { unported.flag }
+      expect(command).toBeNil()
+      expect(message).toBe(`{unported.flag} isn't ported: {unported.reason}`)
+    end
+  end)
+
+  suite.it('refuses what it can\'t read, and says why', function()
+    for _, case in Refused do
+      local command, message = cli.parse(case.argv)
+      expect(command).toBeNil()
+      expect(message).toBe(case.message)
+    end
+  end)
+
+  suite.it('leaves the argument list as it was', function()
+    local argv = { 'Base.esm', '--output-file', 'Terrain.omwaddon', '--', 'Hills.esp' }
+    cli.parse(argv)
+    expect(argv).toEqual { 'Base.esm', '--output-file', 'Terrain.omwaddon', '--', 'Hills.esp' }
+  end)
+end)
+
+suite.describe('configuration', function()
+  suite.it('is the file the flag names, or the openmw.cfg in the folder it names', function()
+    local order = support.order 'cli-configuration'
+    local byFile: cli.Command = { action = 'merge', config = order.file, options = {} }
+    local byFolder: cli.Command = { action = 'merge', config = order.config, options = {} }
+
+    expect(cli.configuration(byFile, nil)).toBe(order.file)
+    expect(cli.configuration(byFolder, nil)).toBe(order.file)
+  end)
+
+  suite.it('is the one OPENMW_CONFIG names when no flag names one', function()
+    local order = support.order 'cli-environment'
+    local bare: cli.Command = { action = 'merge', options = {} }
+    local flagged: cli.Command = { action = 'merge', config = order.file, options = {} }
+
+    expect(cli.configuration(bare, order.file)).toBe(order.file)
+    expect(cli.configuration(bare, order.config)).toBe(order.file)
+    expect(cli.configuration(flagged, jess.fs.join(order.root, 'elsewhere'))).toBe(order.file)
+  end)
+
+  suite.it('is refused when nothing names one, with how to', function()
+    local bare: cli.Command = { action = 'merge', options = {} }
+
+    local path, message = cli.configuration(bare, nil)
+    expect(path).toBeNil()
+    expect(message).toBe(NoConfiguration)
+
+    -- An empty OPENMW_CONFIG names nothing.
+    local emptyPath, emptyMessage = cli.configuration(bare, '')
+    expect(emptyPath).toBeNil()
+    expect(emptyMessage).toBe(NoConfiguration)
+  end)
+
+  suite.it('is refused when it isn\'t there, wherever it was named', function()
+    local order = support.order 'cli-missing'
+    local missing = jess.fs.join(order.root, 'missing')
+    local flagged: cli.Command = { action = 'merge', config = missing, options = {} }
+    local bare: cli.Command = { action = 'merge', options = {} }
+    local unfound = `'{missing}' isn't an openmw.cfg or a folder holding one`
+
+    expect(select(2, cli.configuration(flagged, order.file))).toBe(unfound)
+    expect(select(2, cli.configuration(bare, missing))).toBe(unfound)
+
+    -- The data folder is a folder, and holds no openmw.cfg.
+    local empty: cli.Command = { action = 'merge', config = order.data, options = {} }
+    local path, message = cli.configuration(empty, nil)
+    expect(path).toBeNil()
+    expect(message).toBe(`there's no openmw.cfg in '{order.data}'`)
+  end)
+end)
+
+suite.describe('run', function()
+  suite.it(
+    'numbers its exit statuses as jess\'s other tools do',
+    function() expect(cli.Exit).toEqual { ok = 0, invalidInput = 8, runtime = 9 } end
+  )
+
+  suite.it('returns 0 for help and for the version', function()
+    for _, spelling in { '-h', '--help', '-V', '--version' } do
+      expect(cli.run { spelling }).toBe(0)
+    end
+  end)
+
+  suite.it('returns 8 for every command line parse refuses', function()
+    for _, case in Refused do
+      expect(cli.run(case.argv)).toBe(8)
+    end
+  end)
+
+  suite.it('returns 8 when nothing names a configuration', function()
+    local bare: cli.Command = { action = 'merge', options = {} }
+    expect(select(2, cli.configuration(bare, nil))).toBe(NoConfiguration)
+
+    -- With OPENMW_CONFIG set, a bare command line would merge that load order, so it isn't run.
+    if process.env 'OPENMW_CONFIG' then return end
+
+    expect(cli.run {}).toBe(8)
+    expect(cli.run { '--sort-order', 'none', 'Base.esm' }).toBe(8)
+  end)
+
+  suite.it('returns 8 for a configuration that isn\'t there, and writes nothing', function()
+    local order = support.order 'cli-unfound'
+    local missing = jess.fs.join(order.root, 'missing')
+
+    expect(cli.run { '--openmw-cfg', missing }).toBe(8)
+    expect(cli.run { '--config', jess.fs.join(missing, 'openmw.cfg') }).toBe(8)
+    expect(cli.run { '--openmw-cfg', order.data, '--output-file-dir', missing }).toBe(8)
+    expect(jess.fs.exists(missing)).toBe(false)
+    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+  end)
+
+  suite.it('returns 9 when the merge stops, having written no plugin', function()
+    local order = support.order('cli-order', nil, { 'Hills.esp', 'Base.esm', 'Valleys.esp' })
+
+    expect(cli.run { '--openmw-cfg', order.file }).toBe(9)
+    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+  end)
+
+  suite.it('merges the load order into the original\'s plugin, and leaves openmw.cfg alone', function()
+    local order = support.order 'cli-default'
+    local before = assert(jess.fs.read(order.file))
+
+    expect(cli.run { '--openmw-cfg', order.file }).toBe(0)
+    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+    expect(jess.fs.read(order.file)).toBe(before)
+
+    -- Again by the folder, under jess's spelling: the run leaves its own output out of the merge.
+    expect(cli.run { '--config', order.config }).toBe(0)
+    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+  end)
+
+  suite.it('merges with patch files into the original\'s plugin', function()
+    local order = support.order('cli-patched', { 'Hills.mergedlands.toml', 'Valleys.mergedlands.toml' })
+
+    expect(cli.run { `--openmw-cfg={order.config}` }).toBe(0)
+    support.expectOriginal(jess.fs.join(order.out, OutputName), 'patched')
+  end)
+
+  suite.it('writes the plugin where and as --output-file-dir and --output-file say', function()
+    local order = support.order 'cli-elsewhere'
+    local elsewhere = jess.fs.join(order.root, 'elsewhere')
+
+    expect(cli.run {
+      '--openmw-cfg',
+      order.file,
+      '--output-file-dir',
+      elsewhere,
+      '--output-file',
+      'Terrain.omwaddon',
+    }).toBe(0)
+
+    support.expectOriginal(jess.fs.join(elsewhere, 'Terrain.omwaddon'), 'default')
+    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+  end)
+
+  suite.it('merges the plugins named, in the order --sort-order gives them', function()
+    local order = support.order 'cli-plugins'
+    local listed = { 'Hills.esp', 'Base.esm', 'Valleys.esp' }
+
+    -- As listed, Hills loads before its master, and the merge stops.
+    expect(cli.run { '--openmw-cfg', order.file, '--sort-order', 'none', table.unpack(listed) }).toBe(9)
+    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+
+    -- By default the master goes first and the rest by date, which is the order they were built in.
+    expect(cli.run { '--openmw-cfg', order.file, table.unpack(listed) }).toBe(0)
+    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+
+    expect(cli.run { '--openmw-cfg', order.file, '--sort-order', 'none', table.unpack(support.Standard) }).toBe(0)
+    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+  end)
+end)
+
+return suite
