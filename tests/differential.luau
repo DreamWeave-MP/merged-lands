@@ -305,9 +305,12 @@ local function outcome(folder: string, seed: number): string
   return `seed {seed}: {report.lands} lands, {report.merged} merged, {report.seams} seams, {report.textures} textures, {buffer.len(plugin)} bytes, {bytes.sha256(plugin)}`
 end
 
+-- openmw.cfg reads a relative data folder from its own folder, not from where the run started.
+local scratchFolder = made(fs.absolute(scratch :: string))
+
 local outcomes: { string } = {}
 for seed = tonumber(firstSeed) :: number, tonumber(lastSeed) :: number do
-  table.insert(outcomes, outcome(scratch :: string, seed))
+  table.insert(outcomes, outcome(scratchFolder, seed))
 end
 
 -- The merge prints a line of its own for every load order; the outcomes follow them all.

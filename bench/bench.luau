@@ -282,7 +282,8 @@ local function terrainPlugin(
   return plugin
 end
 
-local root: string = scratch
+-- openmw.cfg reads a relative data folder from its own folder, not from where the run started.
+local root: string = made(fs.absolute(scratch))
 local data, config, out =
   jess.fs.join(root, 'data'), jess.fs.join(root, 'config'), jess.fs.join(root, 'out')
 local configFile = jess.fs.join(config, 'openmw.cfg')
