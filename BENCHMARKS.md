@@ -25,24 +25,29 @@ the master alone now takes, about 3 ms is `tes3.land.read`, and of the 49 ms by 
 
 ## The move onto l3i 2.0, base against head
 
-- Machine: Intel Core i7-10870H @ 2.20 GHz, 16 threads, shared with other work while this ran.
+- Machine: Intel Core i7-10870H @ 2.20 GHz, 16 threads, with a load average of about 1 while
+  this ran.
 - Date: 2026-10-13.
 - Binary: the verified release build of Jess 0.1.0 on l3i 2.0.2 (Luau 0.742), the same one for
   both sides, and the same sibling packages.
 - Base: `95f76b1`, the package before the move, with this bench and the tests that pin it.
-  Head: `5cc9cf5`.
+  Head: `a8f3b60`.
 - Protocol: the whole bench run against base, then head, five times over, back to back under one
-  lock; each cell is the median of its five runs. A difference under 5 percent is called no
-  change.
+  lock, and all of that twice; each cell is the median of its ten runs. A difference under 5
+  percent is called no change.
 
 | Workload | Base, ms | Head, ms | Base / head |
 |---|---:|---:|---:|
-| merge a master of 100 cells alone | 17.50 | 10.22 | 1.71x |
-| merge three plugins over it, by load order | 110.17 | 49.03 | 2.25x |
-| merge three plugins over it, by Resolve | 507.75 | 199.49 | 2.55x |
-| merge three plugins over it, by Ignore | 144.42 | 79.08 | 1.83x |
+| merge a master of 100 cells alone | 16.77 | 9.90 | 1.69x |
+| merge three plugins over it, by load order | 105.88 | 48.51 | 2.18x |
+| merge three plugins over it, by Resolve | 494.80 | 189.47 | 2.61x |
+| merge three plugins over it, by Ignore | 134.87 | 76.89 | 1.75x |
 
-An earlier run of the same A/B at the same source gave 1.64x, 2.12x, 2.62x, and 1.86x.
+The two runs of five behind it read 1.68x, 2.22x, 2.56x, 1.74x and 1.71x, 2.20x, 2.61x, 1.75x.
+This table was first measured with other work on the machine, five rounds at `0c89b11`, whose
+source differs from the head's by one local's name: 1.71x, 2.25x, 2.55x, and 1.83x, and a run
+before that 1.64x, 2.12x, 2.62x, and 1.86x. `Ignore` is the row that did not repeat: its base
+took 144 ms then and 135 ms in both runs here.
 
 The whole command, cold, as `src/main.luau` run once per process over the same load order
 (median of 15 runs each, alternating): 342 ms against 345 ms for the master alone, no change,
@@ -51,21 +56,26 @@ order, 1.15x.
 
 ### What moved, commit by commit
 
-Each commit below against its parent, three rounds, same protocol. Rows not named did not move.
+Each commit below against its parent, three rounds, same protocol and the same quiet machine.
+Rows not named did not move.
 
 | Commit | What it does | Moved |
 |---|---|---|
-| `d8ca0a9` | Two buffers compare with `bytes.equals`, not as the strings of their bytes | master alone 1.26x, load order 1.10x |
-| `7ed40b2` | Heights merge an i32 at a time and normals and colors three bytes at a time, in loops of their own | load order 1.77x, Resolve 1.45x, Ignore 1.37x |
-| `92ce32e` | A Resolve keeps the average of each pair of bytes it has met | Resolve 1.72x |
-| `f4934b6` | Normals are masked a row at a time, and `anyEq` on the data plane says first whether there is anything to mask | master alone 1.14x |
-| `4dcaf6d` | A cell's sides are taken with `data.gather` and put back with `data.scatter` | master alone 1.19x, Ignore 1.05x |
-| `387c161` | The inside of a cell is compared a row at a time with `bytes.compare` | nothing: 1.10x by load order on a first reading, which three and then seven more rounds did not repeat |
-| `74c1d56` | A written cell keeps the normal of each pair of whole slopes it has met | load order 1.13x, Ignore 1.16x |
+| `d8ca0a9` | Two buffers compare with `bytes.equals`, not as the strings of their bytes | master alone 1.25x, load order 1.06x, Ignore 1.14x |
+| `7ed40b2` | Heights merge an i32 at a time and normals and colors three bytes at a time, in loops of their own | load order 1.67x, Resolve 1.43x, Ignore 1.24x |
+| `92ce32e` | A Resolve keeps the average of each pair of bytes it has met | Resolve 1.67x |
+| `f4934b6` | Normals are masked a row at a time, and `anyEq` on the data plane says first whether there is anything to mask | master alone 1.12x |
+| `4dcaf6d` | A cell's sides are taken with `data.gather` and put back with `data.scatter` | master alone 1.15x, Ignore 1.05x |
+| `770b480` | The inside of a cell is compared a row at a time with `bytes.compare` | nothing, in three rounds here and in ten before them; it is one function where there were two |
+| `bab9491` | A written cell keeps the normal of each pair of whole slopes it has met | load order 1.13x, Ignore 1.12x |
 
-The comprehensions, reducers, record patterns, and the slice (`b802ff0`, `075f6f2`, `331dfe9`)
-are in code that runs once a merge or once a cell, and moved nothing that repeats: a three-round
-run read 1.08x on one row and another 1.06x on a different one, never the same row twice.
+The first reading of these, with other work on the machine, put none of `Ignore`'s gain at
+`d8ca0a9` and 1.37x of it at `7ed40b2`, and read 1.77x by load order there; its other cells are
+within 5 percent of these.
+
+The comprehensions, reducers, record patterns, and the slice (`28cb3b0`, `9d494ee`, `ae782c6`)
+are in code that runs once a merge or once a cell, and moved nothing that repeats: all of them
+together read 0.97x, 1.00x, 1.00x, and 1.01x here.
 
 ### What moved, and why
 
