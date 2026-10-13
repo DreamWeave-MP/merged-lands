@@ -1185,29 +1185,32 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   end
 
   -- The 65 vertices of each side of a cell, as positions in its arrays: bottom, top, left, right.
-  local sideVertices: { number } = {}
+  -- They are the data plane's index vectors, a u32 a position: the vertices themselves, and the
+  -- three bytes of each one's normal.
+  local sideVertices, sideNormalBytes = buffer.create(260 * 4), buffer.create(780 * 4)
   for index = 0, 64 do
-    sideVertices[index + 1] = index
-    sideVertices[65 + index + 1] = 64 * 65 + index
-    sideVertices[130 + index + 1] = index * 65
-    sideVertices[195 + index + 1] = index * 65 + 64
+    buffer.writeu32(sideVertices, index * 4, index)
+    buffer.writeu32(sideVertices, (65 + index) * 4, 64 * 65 + index)
+    buffer.writeu32(sideVertices, (130 + index) * 4, index * 65)
+    buffer.writeu32(sideVertices, (195 + index) * 4, index * 65 + 64)
+  end
+
+  for slot = 0, 259 do
+    local first = buffer.readu32(sideVertices, slot * 4) * 3
+    buffer.writeu32(sideNormalBytes, slot * 12, first)
+    buffer.writeu32(sideNormalBytes, slot * 12 + 4, first + 1)
+    buffer.writeu32(sideNormalBytes, slot * 12 + 8, first + 2)
   end
 
   local function sideHeights(values: buffer): buffer
     local sides = buffer.create(260 * 4)
-    for slot, vertex in sideVertices do
-      buffer.writei32(sides, (slot - 1) * 4, buffer.readi32(values, vertex * 4))
-    end
-
+    data.gather(values, 'i32', 0, Vertices, sideVertices, sides, 0, 260)
     return sides
   end
 
   local function sideNormals(values: buffer): buffer
     local sides = buffer.create(260 * 3)
-    for slot, vertex in sideVertices do
-      buffer.copy(sides, (slot - 1) * 3, values, vertex * 3, 3)
-    end
-
+    data.gather(values, 'u8', 0, Vertices * 3, sideNormalBytes, sides, 0, 780)
     return sides
   end
 
@@ -1590,9 +1593,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     if heights then
       own(heights)
       local sides = summary.sides :: buffer
-      for slot, vertex in sideVertices do
-        buffer.writei32(heights.value, vertex * 4, readSide(sides, slot))
-      end
+      data.scatter(sides, 'i32', 0, 260, sideVertices, heights.value, 0, Vertices)
 
       local normals = merged.normals
       if normals then mask(normals, heights) end
