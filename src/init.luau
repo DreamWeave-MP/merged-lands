@@ -298,9 +298,10 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
       generatedOutputFiles = stringList(raw.generated_output_files, 'generated_output_files'),
     }
 
-    for _, path in stringList(fromPaths, 'ignore_plugins_from_path') do
-      table.insert(config.ignorePluginsFromPath, joinRelative(userConfigDir, path))
-    end
+    config.ignorePluginsFromPath = [
+      for path in stringList(fromPaths, 'ignore_plugins_from_path')
+      => joinRelative(userConfigDir, path)
+    ]
 
     return config
   end
@@ -359,21 +360,11 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   local function underIgnoredPath(path: string): boolean
     local parts = pathParts(path)
 
-    for _, prefix in ignoredPaths do
-      if #prefix > #parts then continue end
-
-      local matches = true
-      for index, part in prefix do
-        if parts[index] ~= part then
-          matches = false
-          break
-        end
-      end
-
-      if matches then return true end
-    end
-
-    return false
+    return any[
+      for prefix in ignoredPaths
+      if #prefix <= #parts
+      => all[for index, part in enumerate(prefix) => parts[index] == part]
+    ]
   end
 
   type Entry = { name: string, path: string? }
@@ -385,9 +376,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
       table.insert(entries, { name = name, path = openmw:resolve(name) })
     end
   else
-    for _, entry in openmw:content() do
-      table.insert(entries, { name = entry.name, path = entry.path })
-    end
+    entries = [for {name, path} in openmw:content() => { name = name, path = path }]
   end
 
   local kept: { Entry } = {}
@@ -438,10 +427,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
       byName[entry.name] = entry
     end
 
-    kept = {}
-    for _, name in byDate(names, paths) do
-      table.insert(kept, byName[name])
-    end
+    kept = [for name in byDate(names, paths) => byName[name]]
   end
 
   local readable: { loadOrder.Content } = {}
@@ -473,10 +459,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
 
   -- OpenMW loads content in the order given, so a plugin whose master is missing or later is a
   -- broken load order, and the original stops on it.
-  local names: { string } = {}
-  for _, entry in loaded do
-    table.insert(names, entry.name)
-  end
+  local names: { string } = [for entry in loaded => entry.name]
 
   local orderProblems = {}
   for index, entry in loaded do
@@ -1331,11 +1314,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
         if sides then table.insert(sharing, { sides = sides, corner = other }) end
       end
 
-      local total = 0
-      for _, share in sharing do
-        total += readSide(share.sides, share.corner.first)
-      end
-
+      local total = sum[for share in sharing => readSide(share.sides, share.corner.first)]
       local averaged = truncate(total / #sharing)
       for _, share in sharing do
         if readSide(share.sides, share.corner.first) == averaged then continue end
@@ -1395,10 +1374,8 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     return false
   end
 
-  local written: { Summary } = {}
-  for _, summary in summaries do
-    if summary.differs or differsOnSides(summary) then table.insert(written, summary) end
-  end
+  local written: { Summary } =
+    [for summary in summaries if summary.differs or differsOnSides(summary) => summary]
 
   table.sort(written, function(left: Summary, right: Summary): boolean
     if left.cell.gridX ~= right.cell.gridX then return left.cell.gridX < right.cell.gridX end
