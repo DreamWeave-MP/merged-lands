@@ -1214,24 +1214,12 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     return sides
   end
 
-  -- Whether `merged` differs from `loaded` anywhere but the vertices seam repair can still move.
-  local function heightsDifferInside(merged: buffer, loaded: buffer): boolean
+  -- Whether `merged` differs from `loaded` anywhere but the vertices seam repair can still move:
+  -- the 63 inside each of the 63 inner rows, `size` bytes a vertex.
+  local function differInside(merged: buffer, loaded: buffer, size: number): boolean
     for row = 1, 63 do
-      for position = (row * 65 + 1) * 4, (row * 65 + 63) * 4, 4 do
-        if buffer.readi32(merged, position) ~= buffer.readi32(loaded, position) then return true end
-      end
-    end
-
-    return false
-  end
-
-  local function normalsDifferInside(merged: buffer, loaded: buffer): boolean
-    for row = 1, 63 do
-      for position = (row * 65 + 1) * 3, (row * 65 + 63) * 3, 3 do
-        local low = buffer.readu16(merged, position) ~= buffer.readu16(loaded, position)
-        local high = buffer.readu8(merged, position + 2) ~= buffer.readu8(loaded, position + 2)
-        if low or high then return true end
-      end
+      local first = (row * 65 + 1) * size
+      if bytes.compare(merged, first, loaded, first, 63 * size) ~= 0 then return true end
     end
 
     return false
@@ -1249,7 +1237,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
       else
         summary.loadedSides = sideHeights(loadedHeights)
         summary.differs = not bytes.equals(heights.value, loadedHeights)
-          and heightsDifferInside(heights.value, loadedHeights)
+          and differInside(heights.value, loadedHeights, 4)
       end
     end
 
@@ -1263,7 +1251,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
           sideNormals(normals.value), sideNormals(normals.ref)
         summary.loadedNormalSides = sideNormals(loadedNormals)
         summary.differs = not bytes.equals(normals.value, loadedNormals)
-          and normalsDifferInside(normals.value, loadedNormals)
+          and differInside(normals.value, loadedNormals, 3)
       end
     end
 
