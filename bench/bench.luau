@@ -1,0 +1,411 @@
+--!strict
+--!native
+-- The merge, timed through `@merged-lands` the way a tool reaches it: a load order on disk in,
+-- its plugin on disk out. The load order is synthetic and the same every run: a master of 100
+-- cells of rolling ground, and three plugins that raise, repaint, and lower overlapping parts of
+-- it, so that heights, normals, colors, textures, and world maps all conflict, and a ridge ends
+-- on a cell border for the seams to repair. One line per workload, `name<TAB>seconds per call`,
+-- the median of seven batches, after the merge's own lines. Every workload's report and the
+-- SHA-256 of its plugin (less the description, which holds the time) are checked against what
+-- the merge wrote before anything here was changed, so a path that stopped doing the work, or
+-- does it differently, fails here. Run on a release build:
+--   jess run --package . --package-path .. --capability filesystem.read
+--     --capability filesystem.write bench/bench.luau <scratch folder> [filter]
+local bytes = require '@dream/bytes'
+local fs = require '@dream/fs'
+local mergedLands = require '@merged-lands'
+local openmw = require '@openmw'
+local tes3 = require '@tes3'
+
+-- A build without the verified toolchain runs Luau slower than a release does, so a number from
+-- one says nothing about what ships.
+if not jess.bench.verified then
+  error(
+    'merged-lands bench: this jess was built without the verified toolchain: measure on a release build',
+    0
+  )
+end
+
+local scratch: string?, filter: string? = ...
+local only = if filter and filter ~= '' then filter else nil
+
+if not scratch then error('merged-lands bench: name a scratch folder to build the load order in', 0) end
+
+type Report = {
+  output: string?,
+  plugins: number,
+  lands: number,
+  merged: number,
+  textures: number,
+  seams: number,
+  masters: { string },
+  activated: boolean,
+}
+
+type Master = { name: string, size: number }
+
+-- A LAND's parts, each as a function of where in the world it is.
+type Ground = {
+  height: (worldX: number, worldY: number) -> number,
+  normal: (worldX: number, worldY: number) -> number,
+  color: (worldX: number, worldY: number) -> (number, number, number),
+  texture: (squareX: number, squareY: number) -> string,
+  worldMap: (cellX: number, index: number) -> number,
+}
+
+type Terrain = {
+  flags: number,
+  heightOffset: number,
+  heights: buffer,
+  normals: buffer,
+  colors: buffer,
+  textures: buffer,
+  worldMap: buffer,
+}
+
+local Vertices = 65 * 65
+local OutputName = 'Merged Lands.omwaddon'
+
+-- Where HEDR keeps the description, which ends in the time of the run.
+local DescriptionStart, DescriptionLength = 64, 256
+
+local BaseTextures = { 'Sand', 'Grass', 'Rock', 'Snow', 'Ash', 'Moss', 'Road', 'Scrub' }
+
+local function median(samples: { number }): number
+  table.sort(samples)
+  return samples[(#samples + 1) // 2]
+end
+
+--- Seconds per call of `body`: warmed up, then the median of seven batches of a size that takes
+--- about a tenth of a second, a full collection between batches. `verify` is given the result of
+--- the first call and of one more after the last batch, outside the time.
+local function measure(body: () -> Report, verify: (report: Report) -> ()): number
+  jess.bench.collect()
+  verify(body())
+  local start = os.clock()
+  body()
+  local once = math.max(os.clock() - start, 1e-7)
+  local iterations = math.max(1, math.floor(0.1 / once))
+  local samples = table.create(7, 0)
+
+  for batch = 1, 7 do
+    jess.bench.collect()
+    start = os.clock()
+
+    for _ = 1, iterations do
+      body()
+    end
+
+    samples[batch] = (os.clock() - start) / iterations
+  end
+
+  verify(body())
+  return median(samples)
+end
+
+local function made<Value>(value: Value?, message: string?, kind: dream_fs_ErrorKind?): Value
+  if not value then error(message or tostring(kind), 0) end
+
+  return value
+end
+
+--- A triangle wave over `value`: 0 at each multiple of `period`, `height` halfway between.
+local function wave(value: number, period: number, height: number): number
+  local half = period // 2
+  local phase = value % period
+  local rise = if phase < half then phase else period - phase
+
+  return rise * height // half
+end
+
+--- How far inside the rectangle a point is, 0 on its border and outside: a hill's profile.
+local function inside(
+  worldX: number,
+  worldY: number,
+  west: number,
+  south: number,
+  east: number,
+  north: number
+): number
+  return math.max(0, math.min(worldX - west, east - worldX, worldY - south, north - worldY))
+end
+
+-- Rolling ground in steps of 8 units, the same wherever two cells meet, and never at 0.
+local function rolling(worldX: number, worldY: number): number
+  return 120 + wave(worldX, 46, 60) + wave(worldY, 38, 45) + wave(worldX + worldY, 14, 6)
+end
+
+local function baseTexture(squareX: number, squareY: number): string
+  return BaseTextures[(squareX + squareY * 3) % 6 + 1]
+end
+
+local Base: Ground = {
+  height = rolling,
+  normal = function(worldX: number, worldY: number): number return (worldX * 3 + worldY) % 40 - 20 end,
+  color = function(worldX: number, worldY: number): (number, number, number)
+    return 90 + worldX % 64, 80 + worldY % 64, 60 + (worldX + worldY) % 40
+  end,
+  texture = baseTexture,
+  worldMap = function(cellX: number, index: number): number return index % 9 + 1 + cellX end,
+}
+
+-- Raises a ridge that ends on the east border of its cells, where the next cell is the master's:
+-- a seam. It repaints the ridge with a texture of its own and redraws the world map over it.
+local Ridge: Ground = {
+  height = function(worldX: number, worldY: number): number
+    return rolling(worldX, worldY) + math.min(40, inside(worldX, worldY, 130, 130, 530, 380) * 4)
+  end,
+  normal = function(worldX: number, worldY: number): number return (worldX + worldY * 5) % 60 - 30 end,
+  color = Base.color,
+  texture = function(squareX: number, squareY: number): string
+    if inside(squareX * 4, squareY * 4, 130, 130, 530, 380) > 8 then return 'Mud' end
+
+    return baseTexture(squareX, squareY)
+  end,
+  worldMap = function(cellX: number, index: number): number return index % 5 + 3 + cellX end,
+}
+
+-- Leaves the ground alone and repaints a band of it, vertex colors and textures both.
+local Paint: Ground = {
+  height = rolling,
+  normal = Base.normal,
+  color = function(worldX: number, worldY: number): (number, number, number)
+    if inside(worldX, worldY, 270, 10, 620, 360) == 0 then return Base.color(worldX, worldY) end
+
+    return 200, 40 + worldX % 64, 40 + worldY % 64
+  end,
+  texture = function(squareX: number, squareY: number): string
+    if (squareX + squareY) % 4 == 0 then return 'Cobble' end
+
+    return baseTexture(squareX, squareY)
+  end,
+  worldMap = Base.worldMap,
+}
+
+-- Made against the master alone: it lowers a valley across the ridge, recolors part of the
+-- painted band, repaints some of what both others painted, and redraws the world map again.
+local Delta: Ground = {
+  height = function(worldX: number, worldY: number): number
+    return rolling(worldX, worldY) - math.min(30, inside(worldX, worldY, 10, 200, 300, 560) * 3)
+  end,
+  normal = function(worldX: number, worldY: number): number return (worldX * 7 + worldY) % 50 - 25 end,
+  color = function(worldX: number, worldY: number): (number, number, number)
+    if inside(worldX, worldY, 200, 200, 380, 380) == 0 then return Base.color(worldX, worldY) end
+
+    return 30 + worldY % 64, 90, 150 + worldX % 64
+  end,
+  texture = function(squareX: number, squareY: number): string
+    if (squareX * 2 + squareY) % 5 == 0 then return 'Silt' end
+
+    return baseTexture(squareX, squareY)
+  end,
+  worldMap = function(cellX: number, index: number): number return index % 7 + 2 + cellX end,
+}
+
+--- A LAND at `grid` of `ground`, its textures numbered by where `textures` lists their ids.
+local function land(plugin: tes3.Plugin, grid: { number }, ground: Ground, textures: { string })
+  local cellX, cellY = grid[1], grid[2]
+  local index = plugin:count()
+  plugin:insertValue(index, { type = 'Landscape', grid = grid })
+
+  local offset = ground.height(cellX * 64, cellY * 64)
+  local steps, slopes = buffer.create(Vertices * 4), buffer.create(Vertices * 3)
+  local painted = buffer.create(Vertices * 3)
+
+  for vertex = 0, Vertices - 1 do
+    local worldX, worldY = cellX * 64 + vertex % 65, cellY * 64 + vertex // 65
+    buffer.writei32(steps, vertex * 4, ground.height(worldX, worldY) - offset)
+    buffer.writei8(slopes, vertex * 3, ground.normal(worldX, worldY))
+    buffer.writei8(slopes, vertex * 3 + 2, 120)
+
+    local red, green, blue = ground.color(worldX, worldY)
+    buffer.writeu8(painted, vertex * 3, red)
+    buffer.writeu8(painted, vertex * 3 + 1, green)
+    buffer.writeu8(painted, vertex * 3 + 2, blue)
+  end
+
+  local indices = buffer.create(512)
+  for square = 0, 255 do
+    local id = ground.texture(cellX * 16 + square % 16, cellY * 16 + square // 16)
+    buffer.writeu16(indices, square * 2, made(table.find(textures, id), `no texture {id}`))
+  end
+
+  local worldMap = buffer.create(81)
+  for square = 0, 80 do
+    buffer.writei8(worldMap, square, ground.worldMap(cellX, square))
+  end
+
+  local terrain: Terrain = {
+    flags = 15,
+    heightOffset = offset,
+    heights = steps,
+    normals = slopes,
+    colors = painted,
+    textures = indices,
+    worldMap = worldMap,
+  }
+
+  tes3.land.write(plugin, index, terrain)
+end
+
+--- A plugin of `ground` over the cells from (`west`, `south`) to (`east`, `north`), with an LTEX
+--- for each of `textures` in that order.
+local function terrainPlugin(
+  fileType: tes3.FileType,
+  masters: { Master }?,
+  textures: { string },
+  ground: Ground,
+  west: number,
+  south: number,
+  east: number,
+  north: number
+): tes3.Plugin
+  local plugin = tes3.new(fileType)
+  plugin:setAuthor 'bench'
+  if masters then plugin:setMasters(masters) end
+
+  for index, id in textures do
+    plugin:insertValue(plugin:count(), {
+      type = 'LandscapeTexture',
+      id = id,
+      index = index - 1,
+      fileName = `tx_{string.lower(id)}.dds`,
+    })
+  end
+
+  for cellY = south, north do
+    for cellX = west, east do
+      land(plugin, { cellX, cellY }, ground, textures)
+    end
+  end
+
+  return plugin
+end
+
+local root: string = scratch
+local data, config, out =
+  jess.fs.join(root, 'data'), jess.fs.join(root, 'config'), jess.fs.join(root, 'out')
+local configFile = jess.fs.join(config, 'openmw.cfg')
+
+-- The load order starts from nothing, whatever an earlier run left in the folder.
+if jess.fs.isDir(root) then made(fs.remove(root, { recursive = true })) end
+
+for _, directory in { data, config, out } do
+  made(fs.mkdir(directory, { recursive = true }))
+end
+
+local function save(plugin: tes3.Plugin, name: string)
+  plugin:updateRecordCount()
+  jess.fs.write(jess.fs.join(data, name), plugin:save())
+end
+
+save(terrainPlugin('master', nil, BaseTextures, Base, 0, 0, 9, 9), 'Base.esm')
+
+local overBase: { Master } =
+  { { name = 'Base.esm', size = made(jess.fs.size(jess.fs.join(data, 'Base.esm'))) } }
+
+-- Each plugin numbers the master's textures its own way, as plugins do.
+local ridgeTextures = { 'Rock', 'Mud', 'Grass', 'Sand', 'Snow', 'Ash', 'Moss' }
+local paintTextures = { 'Cobble', 'Sand', 'Grass', 'Rock', 'Snow', 'Ash', 'Moss' }
+local deltaTextures = { 'Moss', 'Ash', 'Snow', 'Silt', 'Rock', 'Grass', 'Sand' }
+
+save(terrainPlugin('plugin', overBase, ridgeTextures, Ridge, 2, 2, 7, 6), 'Ridge.esp')
+save(terrainPlugin('plugin', overBase, paintTextures, Paint, 4, 0, 9, 5), 'Paint.esp')
+save(terrainPlugin('plugin', overBase, deltaTextures, Delta, 0, 3, 5, 8), 'Delta.esp')
+
+local Everything = { 'Base.esm', 'Ridge.esp', 'Paint.esp', 'Delta.esp' }
+
+--- The patch file that has a plugin merge every part by `strategy`.
+local function patch(strategy: string): string
+  local lines = { 'version = "0"', 'meta_type = "Patch"' }
+  for _, part in { 'height_map', 'vertex_colors', 'texture_indices', 'world_map_data' } do
+    table.insert(lines, `\n[{part}]\nconflict_strategy = "{strategy}"`)
+  end
+
+  return table.concat(lines, '\n') .. '\n'
+end
+
+--- Sets the load order up for a workload: `content` as its content list, and every plugin's
+--- parts merged by `strategy`, or by the default without one.
+local function arrange(content: { string }, strategy: string?)
+  local lines = { `data="{data}"`, `data-local="{out}"` }
+  for _, name in content do
+    table.insert(lines, `content={name}`)
+  end
+
+  jess.fs.write(configFile, table.concat(lines, '\n') .. '\n')
+
+  for _, name in Everything do
+    local patchFile = jess.fs.join(data, `{string.match(name, '^[^.]*')}.mergedlands.toml`)
+    if strategy then
+      jess.fs.write(patchFile, patch(strategy))
+    elseif jess.fs.isFile(patchFile) then
+      made(fs.remove(patchFile))
+    end
+  end
+end
+
+local function merge(): Report
+  local options: { [string]: unknown } = {}
+  mergedLands({ mergedlands = options }, openmw.new(configFile))
+
+  return options.report :: Report
+end
+
+--- What a merge did: its report, and the digest of its plugin without the time of the run.
+local function outcome(report: Report): string
+  local plugin = made(jess.fs.readBuffer(jess.fs.join(out, OutputName)))
+  buffer.fill(plugin, DescriptionStart, 0, DescriptionLength)
+
+  return `{report.lands} lands, {report.merged} merged, {report.seams} seams, {report.textures} textures, {bytes.sha256(plugin)}`
+end
+
+local rows: { string } = {}
+
+--- Times a merge of `content` under `strategy`, which must come out as `expected`.
+local function workload(name: string, content: { string }, strategy: string?, expected: string)
+  if only and not string.find(name, only, 1, true) then return end
+
+  arrange(content, strategy)
+
+  local function verify(report: Report)
+    local got = outcome(report)
+    if got ~= expected then
+      error(`merged-lands bench: '{name}' came out as {got}, not {expected}`, 0)
+    end
+  end
+
+  table.insert(rows, `{name}\t{string.format('%.9f', measure(merge, verify))}`)
+end
+
+workload(
+  'merge a master of 100 cells alone',
+  { 'Base.esm' },
+  nil,
+  '100 lands, 100 merged, 0 seams, 0 textures, 0115899ea73eeb9b02244302b9919862721f348bbc54fcf1dd3a17dc6f98fd93'
+)
+
+workload(
+  'merge three plugins over it, by load order',
+  Everything,
+  nil,
+  '202 lands, 100 merged, 193 seams, 9 textures, 47350cc9971ece7daf25a80238111d6470499c5cf62b4dd4455a8e2ac5b99e97'
+)
+
+workload(
+  'merge three plugins over it, by Resolve',
+  Everything,
+  'Resolve',
+  '202 lands, 100 merged, 636 seams, 10 textures, 12796710e48aae9933eceaf1144229c132b3ef6edd4b5da535b6473dcd30c0fa'
+)
+
+workload(
+  'merge three plugins over it, by Ignore',
+  Everything,
+  'Ignore',
+  '202 lands, 100 merged, 0 seams, 6 textures, d1b5002510768ced598918fd4129d4e03cf4eac3cb23a631c5a8550fb09d0f9e'
+)
+
+for _, row in rows do
+  print(row)
+end
