@@ -1,0 +1,317 @@
+--!strict
+-- A differential check for the merge, for when its loops are changed: a random load order per
+-- seed, merged by whichever `@merged-lands` the run was given, and one line per seed saying what
+-- came out, the report and the SHA-256 of the plugin without the time of the run. Two versions of
+-- the package agree on a seed when their lines are the same, so run it against each and compare:
+--   jess run --package <a checkout> --package-path <its siblings> --capability filesystem.read
+--     --capability filesystem.write tests/differential.luau <scratch folder> <first seed> <last seed>
+-- It isn't a suite, and `jess package test` doesn't run it. A load order is a master of nine
+-- cells and two or three plugins over it: ground flat, gentle, and as steep as VHGT holds, at 0
+-- and far from it; parts the master's, changed in a block, or the plugin's own; LANDs without
+-- some of their parts; texture lists numbered each plugin's way; and patch files choosing a
+-- strategy for every part at random, sometimes leaving one out.
+local bytes = require '@dream/bytes'
+local fs = require '@dream/fs'
+local mergedLands = require '@merged-lands'
+local openmw = require '@openmw'
+local tes3 = require '@tes3'
+
+local scratch: string?, firstSeed: string?, lastSeed: string? = ...
+
+if not scratch or not tonumber(firstSeed) or not tonumber(lastSeed) then
+  error('differential: name a scratch folder, a first seed, and a last seed', 0)
+end
+
+type Report = { lands: number, merged: number, seams: number, textures: number }
+
+-- A cell's terrain as `tes3.land.write` takes it, less the textures.
+type Cell = { steps: buffer, offset: number, normals: buffer, colors: buffer, worldMap: buffer }
+
+-- The block of a cell a plugin changes, in vertices.
+type Block = { west: number, south: number, east: number, north: number }
+
+local Vertices = 65 * 65
+local OutputName = 'Merged Lands.omwaddon'
+
+-- Where HEDR keeps the description, which ends in the time of the run.
+local DescriptionStart, DescriptionLength = 64, 256
+
+local Strategies = { 'Auto', 'Resolve', 'Overwrite', 'Ignore' }
+local Parts = { 'height_map', 'vertex_colors', 'texture_indices', 'world_map_data' }
+local TextureIds = { 'Sand', 'Grass', 'Rock', 'Snow', 'Ash', 'Moss', 'Mud', 'Silt' }
+
+-- How steep a master's ground is, in steps of 8 units a vertex: 127 is all a delta holds.
+local Steepness = { 0, 1, 3, 20, 127 }
+
+local random = 1
+
+local function nextRandom(): number
+  random = bit32.bxor(random, bit32.lshift(random, 13))
+  random = bit32.bxor(random, bit32.rshift(random, 17))
+  random = bit32.bxor(random, bit32.lshift(random, 5))
+  return random
+end
+
+local function below(limit: number): number return nextRandom() % limit end
+
+local function between(low: number, high: number): number return low + below(high - low + 1) end
+
+local function made<Value>(value: Value?, message: string?, kind: dream_fs_ErrorKind?): Value
+  if not value then error(message or tostring(kind), 0) end
+
+  return value
+end
+
+local function clone(source: buffer): buffer return source[1:buffer.len(source)] end
+
+--- `length` random bytes, three in four of them 0 when `sparse`.
+local function randomBytes(length: number, sparse: boolean): buffer
+  local out = buffer.create(length)
+  for position = 0, length - 1 do
+    if sparse and below(4) > 0 then continue end
+
+    buffer.writeu8(out, position, below(256))
+  end
+
+  return out
+end
+
+--- Heights as a walk of steps no steeper than `steepness`, so that every delta fits VHGT's i8.
+local function walk(steepness: number): buffer
+  local steps = buffer.create(Vertices * 4)
+  local rowStart = 0
+  for row = 0, 64 do
+    rowStart += between(-steepness, steepness)
+
+    local height = rowStart
+    buffer.writei32(steps, row * 65 * 4, height)
+    for column = 1, 64 do
+      height += between(-steepness, steepness)
+      buffer.writei32(steps, (row * 65 + column) * 4, height)
+    end
+  end
+
+  return steps
+end
+
+--- Whether VHGT can hold `steps`: every delta along a row and down the first column in an i8.
+local function fits(steps: buffer): boolean
+  local above = 0
+  for row = 0, 64 do
+    local previous = above
+    above = buffer.readi32(steps, row * 65 * 4)
+
+    for column = 0, 64 do
+      local height = buffer.readi32(steps, (row * 65 + column) * 4)
+      if math.abs(height - previous) > 127 then return false end
+
+      previous = height
+    end
+  end
+
+  return true
+end
+
+local function masterCell(): Cell
+  return {
+    steps = walk(Steepness[between(1, #Steepness)]),
+    offset = if below(3) == 0 then 0 else between(-3000, 3000) + below(4) / 4,
+    normals = randomBytes(Vertices * 3, below(3) == 0),
+    colors = randomBytes(Vertices * 3, false),
+    worldMap = randomBytes(81, below(2) == 0),
+  }
+end
+
+--- A plugin's heights for a cell: the master's, the master's with `block` raised or lowered, its
+--- own, or the master's at another offset.
+local function revisedHeights(base: Cell, block: Block): (buffer, number)
+  local how = below(4)
+  if how == 2 then return walk(between(0, 40)), between(-3000, 3000) end
+  if how == 3 then return clone(base.steps), base.offset + between(-2, 2) end
+
+  local steps = clone(base.steps)
+  if how == 0 then return steps, base.offset end
+
+  local rise = between(-2, 2)
+  for row = block.south, block.north do
+    for column = block.west, block.east do
+      local position = (row * 65 + column) * 4
+      buffer.writei32(steps, position, buffer.readi32(steps, position) + rise)
+    end
+  end
+
+  -- A block's border can be a step too steep for a delta; then the ground stays the master's.
+  if not fits(steps) then return clone(base.steps), base.offset end
+
+  return steps, base.offset
+end
+
+--- A plugin's normals or colors for a cell: the master's, the master's with `block` changed, or
+--- its own.
+local function revisedTriples(base: buffer, block: Block): buffer
+  local how = below(4)
+  if how == 2 then return randomBytes(Vertices * 3, below(3) == 0) end
+
+  local out = clone(base)
+  if how ~= 1 then return out end
+
+  for row = block.south, block.north do
+    for column = block.west, block.east do
+      local position = (row * 65 + column) * 3
+      buffer.writeu8(out, position + below(3), below(256))
+      if below(3) == 0 then buffer.writeu8(out, position, 0) end
+    end
+  end
+
+  return out
+end
+
+local function revised(base: Cell): Cell
+  local west, south = below(50), below(50)
+  local block: Block = { west = west, south = south, east = between(west, 64), north = between(south, 64) }
+
+  local steps, offset = revisedHeights(base, block)
+  local worldMap = clone(base.worldMap)
+  if below(2) == 0 then
+    for _ = 1, between(1, 40) do
+      buffer.writeu8(worldMap, below(81), below(256))
+    end
+  end
+
+  return {
+    steps = steps,
+    offset = offset,
+    normals = revisedTriples(base.normals, block),
+    colors = revisedTriples(base.colors, block),
+    worldMap = worldMap,
+  }
+end
+
+--- A patch file that picks a strategy for each part, and leaves one part in six out.
+local function patch(): string
+  local lines = { 'version = "0"', 'meta_type = "Patch"' }
+  for _, part in Parts do
+    table.insert(lines, `\n[{part}]`)
+    table.insert(lines, `conflict_strategy = "{Strategies[between(1, #Strategies)]}"`)
+    if below(6) == 0 then table.insert(lines, 'included = false') end
+  end
+
+  return table.concat(lines, '\n') .. '\n'
+end
+
+--- What the merge makes of seed `seed`'s load order.
+local function outcome(folder: string, seed: number): string
+  random = seed * 2654435761 % 4294967296
+  if random == 0 then random = 1 end
+
+  local root = jess.fs.join(folder, `seed-{seed}`)
+  if jess.fs.isDir(root) then made(fs.remove(root, { recursive = true })) end
+
+  local dataFolder, config, out =
+    jess.fs.join(root, 'data'), jess.fs.join(root, 'config'), jess.fs.join(root, 'out')
+  for _, directory in { dataFolder, config, out } do
+    made(fs.mkdir(directory, { recursive = true }))
+  end
+
+  local masterCells: { [number]: Cell } = {}
+  local lines = { `data="{dataFolder}"`, `data-local="{out}"` }
+  local masterSize = 0
+
+  for position = 0, between(2, 3) do
+    local name = if position == 0 then 'Base.esm' else `Mod{position}.esp`
+    local plugin = tes3.new(if position == 0 then 'master' else 'plugin')
+    plugin:setAuthor 'differential'
+    if position > 0 then plugin:setMasters { { name = 'Base.esm', size = masterSize } } end
+
+    -- Its own numbering of some of the textures, the same one never twice.
+    local textures: { string } = {}
+    local start = below(#TextureIds)
+    for index = 0, between(1, #TextureIds - 1) do
+      local id = TextureIds[(start + index * 3) % #TextureIds + 1]
+      if table.find(textures, id) then continue end
+
+      table.insert(textures, id)
+      plugin:insertValue(plugin:count(), {
+        type = 'LandscapeTexture',
+        id = id,
+        index = #textures - 1,
+        fileName = `tx_{string.lower(id)}_{below(2)}.dds`,
+      })
+    end
+
+    for cell = 0, 8 do
+      -- A plugin leaves one cell in three alone.
+      if position > 0 and below(3) == 0 then continue end
+
+      local cellX, cellY = cell % 3, cell // 3
+      local terrain = if position == 0 then masterCell() else revised(masterCells[cell])
+      if position == 0 then masterCells[cell] = terrain end
+
+      -- One LAND in five is flagged for only some of its parts.
+      local flags = if below(5) == 0 then between(8, 15) else 15
+      local indices = buffer.create(512)
+      for square = 0, 255 do
+        -- Mostly textures the plugin defines; sometimes none, and sometimes one it doesn't.
+        local pick = below(12)
+        local own = (square // (4 + position) + cellX) % #textures + 1
+        buffer.writeu16(indices, square * 2, if pick == 0 then 0 elseif pick == 1 then 40 else own)
+      end
+
+      local index = plugin:count()
+      plugin:insertValue(index, { type = 'Landscape', grid = { cellX, cellY } })
+      tes3.land.write(plugin, index, {
+        flags = flags,
+        heightOffset = terrain.offset,
+        heights = if bit32.btest(flags, 1) then terrain.steps else false,
+        normals = if bit32.btest(flags, 1) then terrain.normals else false,
+        colors = if bit32.btest(flags, 2) then terrain.colors else false,
+        textures = if bit32.btest(flags, 4) then indices else false,
+        worldMap = if below(6) == 0 then false else terrain.worldMap,
+      })
+    end
+
+    plugin:updateRecordCount()
+
+    local path = jess.fs.join(dataFolder, name)
+    jess.fs.write(path, plugin:save())
+    if position == 0 then masterSize = made(jess.fs.size(path)) end
+
+    table.insert(lines, `content={name}`)
+
+    if below(3) > 0 then
+      local stem = string.match(name, '^[^.]*')
+      jess.fs.write(jess.fs.join(dataFolder, `{stem}.mergedlands.toml`), patch())
+    end
+  end
+
+  local configFile = jess.fs.join(config, 'openmw.cfg')
+  jess.fs.write(configFile, table.concat(lines, '\n') .. '\n')
+
+  local options: { [string]: unknown } = {}
+
+  -- The merge raises where the original stops, on a LAND it can't stack on the one before it,
+  -- and that is an outcome to compare too.
+  local done, problem = pcall(mergedLands, { mergedlands = options }, openmw.new(configFile))
+  if not done then
+    made(fs.remove(root, { recursive = true }))
+    return `seed {seed}: raised {tostring(problem)}`
+  end
+
+  local report = options.report :: Report
+  local plugin = made(jess.fs.readBuffer(jess.fs.join(out, OutputName)))
+  buffer.fill(plugin, DescriptionStart, 0, DescriptionLength)
+  made(fs.remove(root, { recursive = true }))
+
+  return `seed {seed}: {report.lands} lands, {report.merged} merged, {report.seams} seams, {report.textures} textures, {buffer.len(plugin)} bytes, {bytes.sha256(plugin)}`
+end
+
+local outcomes: { string } = {}
+for seed = tonumber(firstSeed) :: number, tonumber(lastSeed) :: number do
+  table.insert(outcomes, outcome(scratch :: string, seed))
+end
+
+-- The merge prints a line of its own for every load order; the outcomes follow them all.
+print '---'
+for _, line in outcomes do
+  print(line)
+end
