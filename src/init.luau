@@ -1500,16 +1500,25 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
 
   local function toByte(value: number): number return truncate(math.clamp(value, -128, 127)) end
 
+  -- A normal depends only on how far the ground rises to the next vertex east and to the next
+  -- north. Where both rises are whole steps of 8 units no further than an i8 goes, as they are
+  -- for ground nothing averaged, there are 65,536 pairs of them and a cell's 4,225 vertices share
+  -- a few: this keeps the normal of every pair a merge has met, four bytes a pair, the fourth set
+  -- once the first three are the normal.
+  local slopeNormals: buffer? = nil
+
   -- The original's normals from heights, in its f32 arithmetic, reusing the merge's own normal
   -- wherever the height underneath didn't change and that normal isn't zero.
   local function computeNormals(heights: Relative, normals: Relative?): buffer
     local values, ref = heights.value, heights.ref
     local out = buffer.create(Vertices * 3)
+    local met = slopeNormals or buffer.create(65536 * 4)
+    slopeNormals = met
 
     for row = 0, 64 do
       local fixedY = if row == 64 then 63 else row
       for column = 0, 64 do
-        local vertex = row * 65 + column
+        local position = (row * 65 + column) * 3
         local fixedX = if column == 64 then 63 else column
         local fixed = fixedY * 65 + fixedX
 
@@ -1517,13 +1526,28 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
         local right = f32(buffer.readi32(values, (fixed + 1) * 4) / 8 - height)
         local up = f32(buffer.readi32(values, (fixed + 65) * 4) / 8 - height)
 
+        local whole = math.floor(right) == right and math.floor(up) == up
+        local kept = whole and math.abs(right) <= 127 and math.abs(up) <= 127
+        local slot = if kept then ((right + 128) * 256 + (up + 128)) * 4 else 0
+        if kept and buffer.readu8(met, slot + 3) ~= 0 then
+          buffer.writeu16(out, position, buffer.readu16(met, slot))
+          buffer.writeu8(out, position + 2, buffer.readu8(met, slot + 2))
+          continue
+        end
+
         local normalX, normalY = f32(-16 * right), f32(-16 * up)
         local squared = f32(f32(f32(normalX * normalX) + f32(normalY * normalY)) + 65536)
         local length = f32(f32(math.sqrt(squared)) / 127)
 
-        buffer.writei8(out, vertex * 3, toByte(f32(normalX / length)))
-        buffer.writei8(out, vertex * 3 + 1, toByte(f32(normalY / length)))
-        buffer.writei8(out, vertex * 3 + 2, toByte(f32(256 / length)))
+        buffer.writei8(out, position, toByte(f32(normalX / length)))
+        buffer.writei8(out, position + 1, toByte(f32(normalY / length)))
+        buffer.writei8(out, position + 2, toByte(f32(256 / length)))
+
+        if kept then
+          buffer.writeu16(met, slot, buffer.readu16(out, position))
+          buffer.writeu8(met, slot + 2, buffer.readu8(out, position + 2))
+          buffer.writeu8(met, slot + 3, 1)
+        end
       end
     end
 
