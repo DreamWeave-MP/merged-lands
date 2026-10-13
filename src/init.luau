@@ -860,8 +860,8 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   local byteAverages: { [Kind]: buffer } = {}
 
   local function averagesOf(kind: Kind): buffer
-    local kept = byteAverages[kind]
-    if kept then return kept end
+    local met = byteAverages[kind]
+    if met then return met end
 
     local averages = buffer.create(65536 * 2)
     buffer.fill(averages, 0, 0xff)
