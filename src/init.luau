@@ -849,20 +849,46 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     return value
   end
 
-  -- One component of a normal or a color that both sides changed.
-  local function resolveByte(kind: Kind, target: buffer, right: buffer, at: number)
-    if kind == Normals then
-      local leftValue, rightValue = buffer.readi8(target, at), buffer.readi8(right, at)
-      if leftValue == rightValue then return end
+  -- A normal's or a color's component is a byte, so there are 65,536 pairs of them to average,
+  -- and two plugins that repainted one cell ask for the same few thousands of times over. Each
+  -- kind keeps the byte its average wrote for every pair it has met, an i16 a pair, -1 until then.
+  local byteAverages: { [Kind]: buffer } = {}
 
-      buffer.writei8(target, at, average(kind, leftValue, rightValue))
+  local function averagesOf(kind: Kind): buffer
+    local kept = byteAverages[kind]
+    if kept then return kept end
+
+    local averages = buffer.create(65536 * 2)
+    buffer.fill(averages, 0, 0xff)
+    byteAverages[kind] = averages
+    return averages
+  end
+
+  -- One component of a normal or a color that both sides changed.
+  local function resolveByte(
+    kind: Kind,
+    averages: buffer,
+    target: buffer,
+    right: buffer,
+    at: number
+  )
+    local leftByte, rightByte = buffer.readu8(target, at), buffer.readu8(right, at)
+    if leftByte == rightByte then return end
+
+    local slot = (leftByte * 256 + rightByte) * 2
+    local known = buffer.readi16(averages, slot)
+    if known >= 0 then
+      buffer.writeu8(target, at, known)
       return
     end
 
-    local leftValue, rightValue = buffer.readu8(target, at), buffer.readu8(right, at)
-    if leftValue == rightValue then return end
+    if kind == Normals then
+      buffer.writei8(target, at, average(kind, buffer.readi8(target, at), buffer.readi8(right, at)))
+    else
+      buffer.writeu8(target, at, average(kind, leftByte, rightByte))
+    end
 
-    buffer.writeu8(target, at, average(kind, leftValue, rightValue))
+    buffer.writei16(averages, slot, buffer.readu8(target, at))
   end
 
   local function resolve(kind: Kind, left: Relative, right: Relative): Relative
@@ -884,6 +910,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
         end
       end
     elseif kind.components == 3 then
+      local averages = averagesOf(kind)
       for position = 0, last, 3 do
         if sameTriple(rightVal, rightRef, position) then continue end
 
@@ -892,9 +919,9 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
           continue
         end
 
-        resolveByte(kind, target, rightVal, position)
-        resolveByte(kind, target, rightVal, position + 1)
-        resolveByte(kind, target, rightVal, position + 2)
+        resolveByte(kind, averages, target, rightVal, position)
+        resolveByte(kind, averages, target, rightVal, position + 1)
+        resolveByte(kind, averages, target, rightVal, position + 2)
       end
     else
       for position = 0, last, size do
