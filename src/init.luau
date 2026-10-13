@@ -721,11 +721,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     return buffer.readu8(left, position) == buffer.readu8(right, position)
   end
 
-  local function copy(source: buffer): buffer
-    local target = buffer.create(buffer.len(source))
-    buffer.copy(target, 0, source)
-    return target
-  end
+  local function copy(source: buffer): buffer return source[1:buffer.len(source)] end
 
   local function own(map: Relative)
     if map.owned then return end
