@@ -670,7 +670,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     local textures: buffer? = nil
     local indices = terrain.textures
     if indices then
-      local remap, fallback = source.remap, source.fallback
+      local {remap, fallback} = source
       local remapped = buffer.create(512)
       for position = 0, 510, 2 do
         local index = buffer.readu16(indices, position)
@@ -742,7 +742,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     return { ref = ref, value = values, owned = false }
   end
 
-  local function modified(map: Relative): boolean return not bytes.equals(map.ref, map.value) end
+  local function modified({ref, value}: Relative): boolean return not bytes.equals(ref, value) end
 
   -- Normals only count where the heights under them changed too.
   local function mask(normals: Relative, heights: Relative?)
@@ -992,8 +992,8 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     return { ref = before, value = merged, owned = true }
   end
 
-  local function describe(cell: LandCell, contribution: Contribution): string
-    return `LAND ({cell.gridX}, {cell.gridY}) in {sources[contribution.source].name}`
+  local function describe({gridX, gridY}: LandCell, contribution: Contribution): string
+    return `LAND ({gridX}, {gridY}) in {sources[contribution.source].name}`
   end
 
   -- One LAND over another, as the original's reference landmass stacks them: each part the later
@@ -1297,9 +1297,10 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   for _, summary in summaries do
     if not summary.sides then continue end
 
+    local {gridX, gridY} = summary.cell
     for _, corner in Corners do
-      local pointX = summary.cell.gridX * 64 + corner.dx
-      local pointY = summary.cell.gridY * 64 + corner.dy
+      local pointX = gridX * 64 + corner.dx
+      local pointY = gridY * 64 + corner.dy
       local point = (pointX + 4194304) * 8388608 + (pointY + 4194304)
       if cornersDone[point] then continue end
 
@@ -1344,23 +1345,20 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     local sides = summary.sides
     if not sides then continue end
 
-    local cell = summary.cell
-    local east = summaryByKey[cellKey(cell.gridX + 1, cell.gridY)]
+    local {gridX, gridY} = summary.cell
+    local east = summaryByKey[cellKey(gridX + 1, gridY)]
     local eastSides = east and east.sides
     if eastSides then repairSide(sides, 196, eastSides, 131) end
 
-    local north = summaryByKey[cellKey(cell.gridX, cell.gridY + 1)]
+    local north = summaryByKey[cellKey(gridX, gridY + 1)]
     local northSides = north and north.sides
     if northSides then repairSide(sides, 66, northSides, 1) end
   end
 
   -- A merged cell is only written where it differs from what OpenMW loads without it.
   local function differsOnSides(summary: Summary): boolean
-    local sides, sideRefs, loadedSides = summary.sides, summary.sideRefs, summary.loadedSides
+    local {sides, sideRefs, loadedSides, normalSides, normalRefSides, loadedNormalSides} = summary
     if not sides or not sideRefs or not loadedSides then return false end
-
-    local normalSides, normalRefSides, loadedNormalSides =
-      summary.normalSides, summary.normalRefSides, summary.loadedNormalSides
 
     for slot = 1, 260 do
       local height = readSide(sides, slot)
