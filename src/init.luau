@@ -708,14 +708,30 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
 
   local function uses(flags: number, bits: number): boolean return bit32.band(flags, bits) ~= 0 end
 
-  local function sameElement(kind: Kind, left: buffer, right: buffer, position: number): boolean
-    local size = kind.size
-    if size == 4 then return buffer.readi32(left, position) == buffer.readi32(right, position) end
-    if size == 2 then return buffer.readu16(left, position) == buffer.readu16(right, position) end
-    if size == 1 then return buffer.readu8(left, position) == buffer.readu8(right, position) end
+  -- A LAND's parts come in two shapes that count: heights are an i32 a vertex, and normals and
+  -- colors three bytes a vertex. Every merge below spells its loop out for each, as 4,225 vertices
+  -- a part is where a merge's time goes. Texture indices and the world map are a few hundred
+  -- elements of one number each, and share the loop that asks `sameElement`.
+  local function sameHeight(left: buffer, right: buffer, position: number): boolean
+    return buffer.readi32(left, position) == buffer.readi32(right, position)
+  end
 
+  local function sameTriple(left: buffer, right: buffer, position: number): boolean
     return buffer.readu16(left, position) == buffer.readu16(right, position)
       and buffer.readu8(left, position + 2) == buffer.readu8(right, position + 2)
+  end
+
+  local function copyTriple(target: buffer, source: buffer, position: number)
+    buffer.writeu16(target, position, buffer.readu16(source, position))
+    buffer.writeu8(target, position + 2, buffer.readu8(source, position + 2))
+  end
+
+  local function sameElement(kind: Kind, left: buffer, right: buffer, position: number): boolean
+    if kind.size == 2 then
+      return buffer.readu16(left, position) == buffer.readu16(right, position)
+    end
+
+    return buffer.readu8(left, position) == buffer.readu8(right, position)
   end
 
   local function copy(source: buffer): buffer
@@ -752,22 +768,35 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     local heightRef, heightVal, normalRef, normalVal =
       heights.ref, heights.value, normals.ref, normals.value
     for vertex = 0, Vertices - 1 do
-      local position = vertex * 4
-      if buffer.readi32(heightVal, position) ~= buffer.readi32(heightRef, position) then
-        continue
-      end
+      if not sameHeight(heightVal, heightRef, vertex * 4) then continue end
 
-      buffer.copy(normalVal, vertex * 3, normalRef, vertex * 3, 3)
+      copyTriple(normalVal, normalRef, vertex * 3)
     end
   end
 
   local function overwrite(kind: Kind, left: Relative, right: Relative): Relative
     own(left)
     local size, target, rightRef, rightVal = kind.size, left.value, right.ref, right.value
-    for position = 0, (kind.count - 1) * size, size do
-      if sameElement(kind, rightVal, rightRef, position) then continue end
+    local last = (kind.count - 1) * size
 
-      buffer.copy(target, position, rightVal, position, size)
+    if kind == Heights then
+      for position = 0, last, 4 do
+        if sameHeight(rightVal, rightRef, position) then continue end
+
+        buffer.writei32(target, position, buffer.readi32(rightVal, position))
+      end
+    elseif kind.components == 3 then
+      for position = 0, last, 3 do
+        if sameTriple(rightVal, rightRef, position) then continue end
+
+        copyTriple(target, rightVal, position)
+      end
+    else
+      for position = 0, last, size do
+        if sameElement(kind, rightVal, rightRef, position) then continue end
+
+        buffer.copy(target, position, rightVal, position, size)
+      end
     end
 
     return left
@@ -777,11 +806,29 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     own(left)
     local size, target, leftRef, rightRef, rightVal =
       kind.size, left.value, left.ref, right.ref, right.value
-    for position = 0, (kind.count - 1) * size, size do
-      if not sameElement(kind, target, leftRef, position) then continue end
-      if sameElement(kind, rightVal, rightRef, position) then continue end
+    local last = (kind.count - 1) * size
 
-      buffer.copy(target, position, rightVal, position, size)
+    if kind == Heights then
+      for position = 0, last, 4 do
+        if not sameHeight(target, leftRef, position) then continue end
+        if sameHeight(rightVal, rightRef, position) then continue end
+
+        buffer.writei32(target, position, buffer.readi32(rightVal, position))
+      end
+    elseif kind.components == 3 then
+      for position = 0, last, 3 do
+        if not sameTriple(target, leftRef, position) then continue end
+        if sameTriple(rightVal, rightRef, position) then continue end
+
+        copyTriple(target, rightVal, position)
+      end
+    else
+      for position = 0, last, size do
+        if not sameElement(kind, target, leftRef, position) then continue end
+        if sameElement(kind, rightVal, rightRef, position) then continue end
+
+        buffer.copy(target, position, rightVal, position, size)
+      end
     end
 
     return left
@@ -802,38 +849,70 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     return value
   end
 
-  local function writeComponent(kind: Kind, target: buffer, position: number, value: number)
-    if kind == Heights then
-      buffer.writei32(target, position, value)
-    elseif kind == Textures then
-      buffer.writeu16(target, position, value)
-    elseif kind == Normals then
-      buffer.writei8(target, position, value)
-    else
-      buffer.writeu8(target, position, value)
+  -- One component of a normal or a color that both sides changed.
+  local function resolveByte(kind: Kind, target: buffer, right: buffer, at: number)
+    if kind == Normals then
+      local leftValue, rightValue = buffer.readi8(target, at), buffer.readi8(right, at)
+      if leftValue == rightValue then return end
+
+      buffer.writei8(target, at, average(kind, leftValue, rightValue))
+      return
     end
+
+    local leftValue, rightValue = buffer.readu8(target, at), buffer.readu8(right, at)
+    if leftValue == rightValue then return end
+
+    buffer.writeu8(target, at, average(kind, leftValue, rightValue))
   end
 
   local function resolve(kind: Kind, left: Relative, right: Relative): Relative
     own(left)
     local size, target, leftRef, rightRef, rightVal =
       kind.size, left.value, left.ref, right.ref, right.value
-    local width = size // kind.components
+    local last = (kind.count - 1) * size
 
-    for position = 0, (kind.count - 1) * size, size do
-      if sameElement(kind, rightVal, rightRef, position) then continue end
+    if kind == Heights then
+      for position = 0, last, 4 do
+        if sameHeight(rightVal, rightRef, position) then continue end
 
-      if sameElement(kind, target, leftRef, position) then
-        buffer.copy(target, position, rightVal, position, size)
-        continue
+        local leftValue, rightValue =
+          buffer.readi32(target, position), buffer.readi32(rightVal, position)
+        if leftValue == buffer.readi32(leftRef, position) then
+          buffer.writei32(target, position, rightValue)
+        elseif leftValue ~= rightValue then
+          buffer.writei32(target, position, average(kind, leftValue, rightValue))
+        end
       end
+    elseif kind.components == 3 then
+      for position = 0, last, 3 do
+        if sameTriple(rightVal, rightRef, position) then continue end
 
-      for component = 0, kind.components - 1 do
-        local at = position + component * width
-        local leftValue, rightValue = kind.read(target, at), kind.read(rightVal, at)
+        if sameTriple(target, leftRef, position) then
+          copyTriple(target, rightVal, position)
+          continue
+        end
+
+        resolveByte(kind, target, rightVal, position)
+        resolveByte(kind, target, rightVal, position + 1)
+        resolveByte(kind, target, rightVal, position + 2)
+      end
+    else
+      for position = 0, last, size do
+        if sameElement(kind, rightVal, rightRef, position) then continue end
+
+        if sameElement(kind, target, leftRef, position) then
+          buffer.copy(target, position, rightVal, position, size)
+          continue
+        end
+
+        local leftValue, rightValue = kind.read(target, position), kind.read(rightVal, position)
         if leftValue == rightValue then continue end
 
-        writeComponent(kind, target, at, average(kind, leftValue, rightValue))
+        if kind == Textures then
+          buffer.writeu16(target, position, average(kind, leftValue, rightValue))
+        else
+          buffer.writeu8(target, position, average(kind, leftValue, rightValue))
+        end
       end
     end
 
@@ -1270,7 +1349,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
       if not normalSides or not normalRefSides or not loadedNormalSides then continue end
 
       local normal = if height == readSide(sideRefs, slot) then normalRefSides else normalSides
-      if not sameElement(Normals, normal, loadedNormalSides, (slot - 1) * 3) then return true end
+      if not sameTriple(normal, loadedNormalSides, (slot - 1) * 3) then return true end
     end
 
     return false
