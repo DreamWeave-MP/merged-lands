@@ -54,8 +54,12 @@ SOFTWARE.
 
 local bytes = require '@dream/bytes'
 local contexts = require '@openmw'
+local data = require '@dream/data'
 local loadOrder = require '@load-order'
 local tes3 = require '@tes3'
+
+-- A LAND's heights as the data plane reads them: an i32 a vertex.
+local HeightSpan: dream_data_Kind_i32 = data.i32()
 
 type Strategy = 'Auto' | 'Resolve' | 'Overwrite' | 'Ignore'
 
@@ -767,10 +771,28 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
 
     local heightRef, heightVal, normalRef, normalVal =
       heights.ref, heights.value, normals.ref, normals.value
-    for vertex = 0, Vertices - 1 do
-      if not sameHeight(heightVal, heightRef, vertex * 4) then continue end
 
-      copyTriple(normalVal, normalRef, vertex * 3)
+    -- Heights measured against nothing are unchanged only where they are 0, which for most LANDs
+    -- is nowhere.
+    if heightRef == zeros[Heights] then
+      local unchanged = HeightSpan:anyEq(heightVal, 0, Vertices, 0)
+      if not unchanged then return end
+    end
+
+    for row = 0, 64 do
+      local first = row * 65
+
+      -- A row of heights nothing changed takes its normals back in one copy.
+      if bytes.compare(heightVal, first * 4, heightRef, first * 4, 65 * 4) == 0 then
+        buffer.copy(normalVal, first * 3, normalRef, first * 3, 65 * 3)
+        continue
+      end
+
+      for vertex = first, first + 64 do
+        if not sameHeight(heightVal, heightRef, vertex * 4) then continue end
+
+        copyTriple(normalVal, normalRef, vertex * 3)
+      end
     end
   end
 
