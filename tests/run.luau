@@ -389,4 +389,57 @@ suite.describe('merging conflicts in every part', function()
   end)
 end)
 
+-- A normal only counts where the height under it changed, and a height measured against nothing
+-- is unchanged only at 0: a master's vertex there loses its own normal for the one its slopes
+-- give. No golden has ground at 0, and the merge asks about it in one pass over a cell's heights.
+suite.describe('ground at a height of 0', function()
+  --- A master of one LAND, level but for `vertex` at 0, every normal the same and not what any
+  --- slope gives; answers with the normal the merge wrote over `vertex`.
+  local function normalOver(vertex: number): string
+    local order = support.order(`zero-{vertex}`, nil, { 'Level.esm' })
+
+    local heights, normals = buffer.create(Vertices * 4), buffer.create(Vertices * 3)
+    buffer.writei32(heights, vertex * 4, -20)
+    for position = 0, Vertices * 3 - 3, 3 do
+      buffer.writei8(normals, position, 33)
+      buffer.writei8(normals, position + 1, -44)
+      buffer.writei8(normals, position + 2, 55)
+    end
+
+    local level = tes3.new 'master'
+    level:insertValue(1, { type = 'Landscape', grid = { 0, 0 } })
+    tes3.land.write(level, 1, {
+      flags = 9,
+      heightOffset = 20,
+      heights = heights,
+      normals = normals,
+      worldMap = false,
+    })
+
+    level:updateRecordCount()
+    jess.fs.write(jess.fs.join(order.data, 'Level.esm'), level:save())
+
+    local report = merge(order, {})
+    local merged = tes3.open(assert(jess.fs.readBuffer(report.output :: string)))
+    expect(merged:count()).toBe(2)
+
+    local written = assert(tes3.land.read(merged, 1).normals)
+    local east, north, away =
+      buffer.readi8(written, vertex * 3),
+      buffer.readi8(written, vertex * 3 + 1),
+      buffer.readi8(written, vertex * 3 + 2)
+
+    return `{east} {north} {away}`
+  end
+
+  suite.it('gives a lone vertex there the normal of its slopes, wherever in the cell it is', function()
+    -- The first vertex, the end of its row, the middle of the cell, and the last vertex of all,
+    -- the one left over when 4,225 heights are taken eight at a time.
+    expect(normalOver(0)).toBe '-78 -78 62'
+    expect(normalOver(64)).toBe '99 0 79'
+    expect(normalOver(2112)).toBe '-78 -78 62'
+    expect(normalOver(4224)).toBe '0 0 127'
+  end)
+end)
+
 return suite
