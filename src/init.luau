@@ -52,6 +52,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ]]
 
+local bytes = require '@dream/bytes'
 local contexts = require '@openmw'
 local loadOrder = require '@load-order'
 local tes3 = require '@tes3'
@@ -707,11 +708,6 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
 
   local function uses(flags: number, bits: number): boolean return bit32.band(flags, bits) ~= 0 end
 
-  -- Luau interns strings, so two buffers' bytes compare as one memcmp and a pointer check.
-  local function sameBytes(left: buffer, right: buffer): boolean
-    return buffer.tostring(left) == buffer.tostring(right)
-  end
-
   local function sameElement(kind: Kind, left: buffer, right: buffer, position: number): boolean
     local size = kind.size
     if size == 4 then return buffer.readi32(left, position) == buffer.readi32(right, position) end
@@ -738,12 +734,12 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   -- `values` measured against `reference` (zeros without one), or nil where nothing differs.
   local function relative(kind: Kind, reference: buffer?, values: buffer): Relative?
     local ref = reference or zeros[kind]
-    if sameBytes(ref, values) then return nil end
+    if bytes.equals(ref, values) then return nil end
 
     return { ref = ref, value = values, owned = false }
   end
 
-  local function modified(map: Relative): boolean return not sameBytes(map.ref, map.value) end
+  local function modified(map: Relative): boolean return not bytes.equals(map.ref, map.value) end
 
   -- Normals only count where the heights under them changed too.
   local function mask(normals: Relative, heights: Relative?)
@@ -1121,7 +1117,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
         summary.differs = true
       else
         summary.loadedSides = sideHeights(loadedHeights)
-        summary.differs = not sameBytes(heights.value, loadedHeights)
+        summary.differs = not bytes.equals(heights.value, loadedHeights)
           and heightsDifferInside(heights.value, loadedHeights)
       end
     end
@@ -1135,7 +1131,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
         summary.normalSides, summary.normalRefSides =
           sideNormals(normals.value), sideNormals(normals.ref)
         summary.loadedNormalSides = sideNormals(loadedNormals)
-        summary.differs = not sameBytes(normals.value, loadedNormals)
+        summary.differs = not bytes.equals(normals.value, loadedNormals)
           and normalsDifferInside(normals.value, loadedNormals)
       end
     end
@@ -1153,7 +1149,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
       if not map then continue end
 
       local against = part.loaded
-      summary.differs = not against or not sameBytes(map.value, against)
+      summary.differs = not against or not bytes.equals(map.value, against)
     end
 
     local mergedTextures = merged.textures
