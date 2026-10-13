@@ -1527,9 +1527,9 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
         local up = f32(buffer.readi32(values, (fixed + 65) * 4) / 8 - height)
 
         local whole = math.floor(right) == right and math.floor(up) == up
-        local kept = whole and math.abs(right) <= 127 and math.abs(up) <= 127
-        local slot = if kept then ((right + 128) * 256 + (up + 128)) * 4 else 0
-        if kept and buffer.readu8(met, slot + 3) ~= 0 then
+        local keyed = whole and math.abs(right) <= 127 and math.abs(up) <= 127
+        local slot = if keyed then ((right + 128) * 256 + (up + 128)) * 4 else 0
+        if keyed and buffer.readu8(met, slot + 3) ~= 0 then
           buffer.writeu16(out, position, buffer.readu16(met, slot))
           buffer.writeu8(out, position + 2, buffer.readu8(met, slot + 2))
           continue
@@ -1543,7 +1543,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
         buffer.writei8(out, position + 1, toByte(f32(normalY / length)))
         buffer.writei8(out, position + 2, toByte(f32(256 / length)))
 
-        if kept then
+        if keyed then
           buffer.writeu16(met, slot, buffer.readu16(out, position))
           buffer.writeu8(met, slot + 2, buffer.readu8(out, position + 2))
           buffer.writeu8(met, slot + 3, 1)
