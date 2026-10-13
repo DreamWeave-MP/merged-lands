@@ -211,6 +211,63 @@ suite.describe('reading the load order', function()
   end)
 end)
 
+-- Which plugins a merge takes, and in what order: the paths merged_lands.toml or the options
+-- leave out, and the plugins the options name.
+suite.describe('choosing what to merge', function()
+  suite.it('leaves out a plugin merged_lands.toml ignores by its path, whatever its case', function()
+    local order = support.order 'ignored-path'
+
+    -- A folder under the plugin, a folder beside the data folder, one relative to openmw.cfg's
+    -- folder, and then the plugin itself, in upper case.
+    local ignoredPaths = {
+      jess.fs.join(order.data, 'Valleys.esp/deeper/than/the/plugin'),
+      jess.fs.join(order.root, 'elsewhere'),
+      'beside-the-configuration',
+      string.upper(jess.fs.join(order.data, 'Valleys.esp')),
+    }
+
+    local quoted = {}
+    for _, path in ignoredPaths do
+      table.insert(quoted, `"{path}"`)
+    end
+
+    jess.fs.write(
+      jess.fs.join(order.config, 'merged_lands.toml'),
+      `ignore_plugins_from_path = [{table.concat(quoted, ', ')}]\n`
+    )
+
+    local report = merge(order, {})
+    expect(line(report)).toBe 'report: 9 lands, 6 merged, 0 seams, 1 textures, masters Base.esm, activated false'
+    expect(report.plugins).toBe(2)
+  end)
+
+  suite.it('leaves out every plugin under a folder the options ignore', function()
+    local order = support.order 'ignored-folder'
+
+    local report = merge(order, { ignorePluginsFromPath = { `{order.data}/.` } })
+    expect(line(report)).toBe 'report: 0 lands, 0 merged, 0 seams, 0 textures, masters , activated false'
+    expect(report.plugins).toBe(0)
+
+    -- A path that only starts like the data folder's ignores nothing in it.
+    local beside = merge(order, { ignorePluginsFromPath = { `{order.data}-beside` } })
+    expect(beside.plugins).toBe(3)
+    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+  end)
+
+  suite.it('merges the plugins named, masters first, and as named when told not to sort', function()
+    local order = support.order 'named'
+    local named = { 'Hills.esp', 'Valleys.esp', 'Base.esm' }
+
+    local report = merge(order, { plugins = named })
+    expect(line(report)).toBe 'report: 12 lands, 7 merged, 71 seams, 4 textures, masters Base.esm Hills.esp Valleys.esp, activated false'
+    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+
+    local unsorted: { [string]: unknown } = { plugins = named, sortOrder = 'none' }
+    expect(function() mergedLands({ mergedlands = unsorted }, openmw.new(order.file)) end).toThrow 'Hills.esp declares master Base.esm but loads before it'
+    expect(unsorted.report).toBeNil()
+  end)
+end)
+
 -- What the original's goldens don't reach either: a third plugin over the other two, changing
 -- heights, normals, colors, textures, and world maps where they already changed them, so that
 -- every part of a LAND conflicts under every strategy. No original wrote these; each plugin is
