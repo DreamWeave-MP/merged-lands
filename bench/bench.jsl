@@ -10,7 +10,7 @@
 -- the merge wrote before anything here was changed, so a path that stopped doing the work, or
 -- does it differently, fails here. Run on a release build:
 --   jess run --package . --package-path .. --capability filesystem.read
---     --capability filesystem.write bench/bench.luau <scratch folder> [filter]
+--     --capability filesystem.write bench/bench.jsl <scratch folder> [filter]
 local bytes = require '@dream/bytes'
 local fs = require '@dream/fs'
 local mergedLands = require '@merged-lands'

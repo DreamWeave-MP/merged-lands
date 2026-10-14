@@ -1,6 +1,6 @@
 --!strict
 --!native
--- What both suites build on: a load order in scratch holding `build.luau`'s plugins, with the
+-- What both suites build on: a load order in scratch holding `build.jsl`'s plugins, with the
 -- patch files in `patches/` beside them when a case asks, and the comparison with the plugins
 -- Merged Lands 0.2.0 itself wrote for them (`golden/`).
 local build = require './build'
@@ -47,7 +47,7 @@ local function configuration(order: Order, content: { string }, dataLocal: boole
   return table.concat(lines, '\n') .. '\n'
 end
 
---- A fresh load order named `name` under the suite's scratch folder: `build.luau`'s plugins in
+--- A fresh load order named `name` under the suite's scratch folder: `build.jsl`'s plugins in
 --- its data folder with the `patches` beside them, the user's configuration in `config`, and
 --- data-local in `out`. `content` is the content list, by default Base, Hills, Valleys.
 local function order(name: string, patches: { string }?, content: { string }?): Order

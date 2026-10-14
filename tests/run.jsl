@@ -1,7 +1,7 @@
 --!strict
 --!native
 -- `@merged-lands` over a load order, held to Merged Lands 0.2.0's own output: the plugins in
--- `golden/` are what the original wrote for the plugins `build.luau` makes, `patched` with the
+-- `golden/` are what the original wrote for the plugins `build.jsl` makes, `patched` with the
 -- `.mergedlands.toml` files in `patches/` beside them. The header's description ends in the time
 -- of the run, so it's left out of the comparison, and nothing else is. `jess package test` runs
 -- every case from the package's source and from its packed JPK.

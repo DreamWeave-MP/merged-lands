@@ -4,7 +4,7 @@
 -- came out, the report and the SHA-256 of the plugin without the time of the run. Two versions of
 -- the package agree on a seed when their lines are the same, so run it against each and compare:
 --   jess run --package <a checkout> --package-path <its siblings> --capability filesystem.read
---     --capability filesystem.write tests/differential.luau <scratch folder> <first seed> <last seed>
+--     --capability filesystem.write tests/differential.jsl <scratch folder> <first seed> <last seed>
 -- It isn't a suite, and `jess package test` doesn't run it. A load order is a master of nine
 -- cells and two or three plugins over it: ground flat, gentle, and as steep as VHGT holds, at 0
 -- and far from it; parts the master's, changed in a block, or the plugin's own; LANDs without

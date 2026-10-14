@@ -1,6 +1,6 @@
 # Merged Lands benchmarks
 
-`bench/bench.luau` times the merge through `@merged-lands`, the way a tool reaches it: a load
+`bench/bench.jsl` times the merge through `@merged-lands`, the way a tool reaches it: a load
 order on disk in, its plugin on disk out. The load order is synthetic and the same every run: a
 master of 100 cells of rolling ground, and three plugins over it, 30, 36, and 36 cells, that
 raise, repaint, and lower overlapping parts of it, so that heights, normals, colors, textures,
@@ -15,7 +15,7 @@ does it differently, stops the bench.
 ```sh
 jess run --package jpk/merged-lands --package-path jpk \
   --capability filesystem.read --capability filesystem.write \
-  jpk/merged-lands/bench/bench.luau <scratch folder> [filter]
+  jpk/merged-lands/bench/bench.jsl <scratch folder> [filter]
 ```
 
 A merge's time is not all this package's. Reading a LAND as buffers and writing one back are
@@ -49,7 +49,7 @@ source differs from the head's by one local's name: 1.71x, 2.25x, 2.55x, and 1.8
 before that 1.64x, 2.12x, 2.62x, and 1.86x. `Ignore` is the row that did not repeat: its base
 took 144 ms then and 135 ms in both runs here.
 
-The whole command, cold, as `src/main.luau` run once per process over the same load order
+The whole command, cold, as `src/main.jsl` run once per process over the same load order
 (median of 15 runs each, alternating): 342 ms against 345 ms for the master alone, no change,
 since starting Jess and loading the packages is nearly all of it; 435 ms against 380 ms by load
 order, 1.15x.
