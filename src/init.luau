@@ -1369,7 +1369,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   end
 
   local written: { Summary } =
-    [for summary in summaries if summary.differs or differsOnSides(summary) => summary]
+    [for summary in summaries if summary.differs or differsOnSides(summary) => summary :: Summary]
 
   table.sort(written, function(left: Summary, right: Summary): boolean
     if left.cell.gridX ~= right.cell.gridX then return left.cell.gridX < right.cell.gridX end
