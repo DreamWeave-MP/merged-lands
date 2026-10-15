@@ -5,7 +5,7 @@ id = "org.dreamweave.merged-lands"
 version = "0.1.0"
 jess_api = "1"
 default_target = "merged-lands"
-include = ["src"]
+include = ["src", "tests"]
 tests = ["tests/run.jsl", "tests/cli.jsl", "tests/style.jsl"]
 
 [dependencies]
@@ -38,4 +38,4 @@ exports = ["@merged-lands", "@merged-lands/cli"]
 kind = "command"
 command = "merged-lands"
 entry = "src/main.jsl"
-capabilities = ["filesystem.read", "filesystem.write", "process.environment"]
+capabilities = ["filesystem.read", "filesystem.write", "process.environment", "process.stdio"]
