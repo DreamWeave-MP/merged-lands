@@ -1,5 +1,4 @@
 --!strict
---!native
 --[[
 @merged-lands: Merged Lands 0.2.0, as a function of (state, openmw), openmw
 being the load order's config from `@openmw`'s `new`.
@@ -645,6 +644,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     end
   end
 
+  @native
   local function readLand(contribution: Contribution): Land
     local source = sources[contribution.source]
     local plugin = source.plugin
@@ -741,6 +741,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   local function modified({ref, value}: Relative): boolean return not bytes.equals(ref, value) end
 
   -- Normals only count where the heights under them changed too.
+  @native
   local function mask(normals: Relative, heights: Relative?)
     own(normals)
     if not heights then
@@ -775,6 +776,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     end
   end
 
+  @native
   local function overwrite(kind: Kind, left: Relative, right: Relative): Relative
     own(left)
     local size, target, rightRef, rightVal = kind.size, left.value, right.ref, right.value
@@ -803,6 +805,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     return left
   end
 
+  @native
   local function ignore(kind: Kind, left: Relative, right: Relative): Relative
     own(left)
     local size, target, leftRef, rightRef, rightVal =
@@ -837,6 +840,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
 
   -- The original's weighted average for two conflicting values, in its f32 arithmetic, truncated
   -- toward zero. Only a patch file's `Resolve` asks for it.
+  @native
   local function average(kind: Kind, left: number, right: number): number
     local leftWeight = f32(math.abs(left) / f32(math.abs(left) + math.abs(right)))
     local rightWeight = f32(1 - leftWeight)
@@ -866,6 +870,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   end
 
   -- One component of a normal or a color that both sides changed.
+  @native
   local function resolveByte(
     kind: Kind,
     averages: buffer,
@@ -892,6 +897,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     buffer.writei16(averages, slot, buffer.readu8(target, at))
   end
 
+  @native
   local function resolve(kind: Kind, left: Relative, right: Relative): Relative
     own(left)
     local size, target, leftRef, rightRef, rightVal =
@@ -1352,6 +1358,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   end
 
   -- A merged cell is only written where it differs from what OpenMW loads without it.
+  @native
   local function differsOnSides(summary: Summary): boolean
     local {sides, sideRefs, loadedSides, normalSides, normalRefSides, loadedNormalSides} = summary
     if not sides or not sideRefs or not loadedSides then return false end
@@ -1468,6 +1475,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   -- VHGT keeps a height per 8 units, as the difference from the vertex before it in its row (or
   -- below it, down the first column) in one signed byte; a steeper step is clamped, as the
   -- original's is.
+  @native
   local function encodeHeights(heights: buffer): (number, buffer)
     local steps = buffer.create(Vertices * 4)
     local offset = truncate(buffer.readi32(heights, 0) / 8)
@@ -1509,6 +1517,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
 
   -- The original's normals from heights, in its f32 arithmetic, reusing the merge's own normal
   -- wherever the height underneath didn't change and that normal isn't zero.
+  @native
   local function computeNormals(heights: Relative, normals: Relative?): buffer
     local values, ref = heights.value, heights.ref
     local out = buffer.create(Vertices * 3)

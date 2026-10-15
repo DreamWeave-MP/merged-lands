@@ -1,5 +1,4 @@
 --!strict
---!native
 --[[
 @merged-lands/cli: Merged Lands' command line, over `@merged-lands`.
 
