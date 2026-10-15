@@ -6,6 +6,7 @@
 -- of the run, so it's left out of the comparison, and nothing else is. `jess package test` runs
 -- every case from the package's source and from its packed JPK.
 local bytes = require '@dream/bytes'
+local fs = require '@dream/fs'
 local mergedLands = require '@merged-lands'
 local openmw = require '@openmw'
 local support = require './support'
@@ -57,7 +58,9 @@ suite.describe('the fixtures', function()
 
       for position, master in masters do
         expect(master.name).toBe(support.Standard[position])
-        expect(jess.fs.size(jess.fs.join(order.data, master.name))).toBe(master.size)
+        local fileStat, problem = fs.stat(fs.join(order.data, master.name))
+        if not fileStat then error(problem, 0) end
+        expect(fileStat.size).toBe(master.size)
       end
     end
   end)
@@ -66,7 +69,7 @@ end)
 suite.describe('merging', function()
   suite.it('matches the original and enables its plugin', function()
     local order = support.order 'default'
-    local output = jess.fs.join(order.out, OutputName)
+    local output = fs.join(order.out, OutputName)
 
     local report = merge(order, { activate = true })
     expect(line(report)).toBe 'report: 12 lands, 7 merged, 71 seams, 4 textures, masters Base.esm Hills.esp Valleys.esp, activated true'
@@ -75,7 +78,9 @@ suite.describe('merging', function()
     support.expectOriginal(output, 'default')
 
     local ending = `content={OutputName}\n`
-    expect(string.sub(assert(jess.fs.read(order.file)), -#ending)).toBe(ending)
+    local fileText, problem = fs.readFileString(order.file)
+    if not fileText then error(problem, 0) end
+    expect(string.sub(fileText, -#ending)).toBe(ending)
 
     -- The next run leaves its own output out of the merge, and writes the same plugin again.
     local again = merge(order, { activate = true })
@@ -89,13 +94,15 @@ suite.describe('merging', function()
 
     local report = merge(order, {})
     expect(line(report)).toBe 'report: 12 lands, 7 merged, 0 seams, 5 textures, masters Base.esm Hills.esp Valleys.esp, activated false'
-    support.expectOriginal(jess.fs.join(order.out, OutputName), 'patched')
-    expect(string.find(assert(jess.fs.read(order.file)), 'Merged Lands', 1, true)).toBeNil()
+    support.expectOriginal(fs.join(order.out, OutputName), 'patched')
+    local fileText, problem = fs.readFileString(order.file)
+    if not fileText then error(problem, 0) end
+    expect(string.find(fileText, 'Merged Lands', 1, true)).toBeNil()
   end)
 
   suite.it('writes elsewhere without enabling what OpenMW cannot load', function()
     local order = support.order 'elsewhere'
-    local elsewhere = jess.fs.join(order.root, 'elsewhere')
+    local elsewhere = fs.join(order.root, 'elsewhere')
 
     local report = merge(order, {
       activate = true,
@@ -104,20 +111,23 @@ suite.describe('merging', function()
     })
 
     expect(report.activated).toBe(false)
-    expect(report.output).toBe(jess.fs.join(elsewhere, 'Terrain.omwaddon'))
-    expect(jess.fs.isFile(jess.fs.join(elsewhere, 'Terrain.omwaddon'))).toBe(true)
-    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
-    expect(string.find(assert(jess.fs.read(order.file)), 'Terrain', 1, true)).toBeNil()
+    expect(report.output).toBe(fs.join(elsewhere, 'Terrain.omwaddon'))
+    expect(fs.isFile(fs.join(elsewhere, 'Terrain.omwaddon'))).toBe(true)
+    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
+    local fileText, problem = fs.readFileString(order.file)
+    if not fileText then error(problem, 0) end
+    expect(string.find(fileText, 'Terrain', 1, true)).toBeNil()
   end)
 
   suite.it('writes to the first data folder without data-local', function()
     local order = support.order 'first-data'
-    jess.fs.write(order.file, support.configuration(order, support.Standard, false))
+    local done, problem = fs.writeFile(order.file, support.configuration(order, support.Standard, false), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
 
     local report = merge(order, {})
-    expect(report.output).toBe(jess.fs.join(order.data, OutputName))
-    expect(jess.fs.isFile(jess.fs.join(order.data, OutputName))).toBe(true)
-    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+    expect(report.output).toBe(fs.join(order.data, OutputName))
+    expect(fs.isFile(fs.join(order.data, OutputName))).toBe(true)
+    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
   end)
 
   suite.it('stops on a master that loads later', function()
@@ -126,7 +136,7 @@ suite.describe('merging', function()
 
     expect(function() mergedLands({ mergedlands = options }, openmw.new(order.file)) end).toThrow 'Hills.esp declares master Base.esm but loads before it'
     expect(options.report).toBeNil()
-    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
   end)
 
   suite.it('needs a Context', function()
@@ -144,12 +154,14 @@ suite.describe('reading the load order', function()
     table.insert(content, 'Missing.esp')
 
     local order = support.order('skipped', nil, content)
-    jess.fs.write(jess.fs.join(order.data, 'Scripts.omwscripts'), 'PLAYER: scripts/player.lua\n')
-    jess.fs.write(jess.fs.join(order.data, 'Broken.esp'), 'not a plugin')
+    local done, problem = fs.writeFile(fs.join(order.data, 'Scripts.omwscripts'), 'PLAYER: scripts/player.lua\n', { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
+    local done, problem = fs.writeFile(fs.join(order.data, 'Broken.esp'), 'not a plugin', { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
 
     local report = merge(order, {})
     expect(report.plugins).toBe(3)
-    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+    support.expectOriginal(fs.join(order.out, OutputName), 'default')
   end)
 
   suite.it('carries a LAND\'s record flags into the plugin', function()
@@ -173,13 +185,16 @@ suite.describe('reading the load order', function()
     })
 
     flagged:updateRecordCount()
-    jess.fs.write(jess.fs.join(order.data, 'Flagged.esm'), flagged:save())
+    local done, problem = fs.writeFile(fs.join(order.data, 'Flagged.esm'), flagged:save(), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
 
     local report = merge(order, {})
     expect(report.lands).toBe(1)
     expect(report.masters).toEqual { 'Flagged.esm' }
 
-    local merged = tes3.open(assert(jess.fs.readBuffer(report.output :: string)))
+    local fileBytes, problem = fs.readFile(report.output :: string)
+    if not fileBytes then error(problem, 0) end
+    local merged = tes3.open(fileBytes)
     expect(merged:count()).toBe(2)
     expect(merged:tag(1)).toBe 'LAND'
     expect(tes3.land.read(merged, 1, {}).grid).toEqual { 3, -2 }
@@ -204,10 +219,11 @@ suite.describe('reading the load order', function()
     })
 
     deleted:updateRecordCount()
-    jess.fs.write(jess.fs.join(order.data, 'Deleted.esp'), deleted:save())
+    local done, problem = fs.writeFile(fs.join(order.data, 'Deleted.esp'), deleted:save(), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
 
     expect(function() merge(order, {}) end).toThrow 'merged-lands: Deleted.esp adds the deleted LTEX Gone, as the original won\'t'
-    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
   end)
 end)
 
@@ -220,10 +236,10 @@ suite.describe('choosing what to merge', function()
     -- A folder under the plugin, a folder beside the data folder, one relative to openmw.cfg's
     -- folder, and then the plugin itself, in upper case.
     local ignoredPaths = {
-      jess.fs.join(order.data, 'Valleys.esp/deeper/than/the/plugin'),
-      jess.fs.join(order.root, 'elsewhere'),
+      fs.join(order.data, 'Valleys.esp/deeper/than/the/plugin'),
+      fs.join(order.root, 'elsewhere'),
       'beside-the-configuration',
-      string.upper(jess.fs.join(order.data, 'Valleys.esp')),
+      string.upper(fs.join(order.data, 'Valleys.esp')),
     }
 
     local quoted = {}
@@ -231,10 +247,12 @@ suite.describe('choosing what to merge', function()
       table.insert(quoted, `"{path}"`)
     end
 
-    jess.fs.write(
-      jess.fs.join(order.config, 'merged_lands.toml'),
-      `ignore_plugins_from_path = [{table.concat(quoted, ', ')}]\n`
+    local done, problem = fs.writeFile(
+      fs.join(order.config, 'merged_lands.toml'),
+      `ignore_plugins_from_path = [{table.concat(quoted, ', ')}]\n`,
+      { atomic = true, createParents = true }
     )
+    if not done then error(problem, 0) end
 
     local report = merge(order, {})
     expect(line(report)).toBe 'report: 9 lands, 6 merged, 0 seams, 1 textures, masters Base.esm, activated false'
@@ -251,7 +269,7 @@ suite.describe('choosing what to merge', function()
     -- A path that only starts like the data folder's ignores nothing in it.
     local beside = merge(order, { ignorePluginsFromPath = { `{order.data}-beside` } })
     expect(beside.plugins).toBe(3)
-    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+    support.expectOriginal(fs.join(order.out, OutputName), 'default')
   end)
 
   suite.it('merges the plugins named, masters first, and as named when told not to sort', function()
@@ -260,7 +278,7 @@ suite.describe('choosing what to merge', function()
 
     local report = merge(order, { plugins = named })
     expect(line(report)).toBe 'report: 12 lands, 7 merged, 71 seams, 4 textures, masters Base.esm Hills.esp Valleys.esp, activated false'
-    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+    support.expectOriginal(fs.join(order.out, OutputName), 'default')
 
     local unsorted: { [string]: unknown } = { plugins = named, sortOrder = 'none' }
     expect(function() mergedLands({ mergedlands = unsorted }, openmw.new(order.file)) end).toThrow 'Hills.esp declares master Base.esm but loads before it'
@@ -278,8 +296,12 @@ suite.describe('merging conflicts in every part', function()
   local function storm(order: support.Order)
     local plugin = tes3.new 'plugin'
     plugin:setAuthor 'test'
+
+    local fileStat, problem = fs.stat(fs.join(order.data, 'Base.esm'))
+    if not fileStat then error(problem, 0) end
+
     plugin:setMasters {
-      { name = 'Base.esm', size = assert(jess.fs.size(jess.fs.join(order.data, 'Base.esm'))) },
+      { name = 'Base.esm', size = fileStat.size },
     }
 
     plugin:insertValue(
@@ -336,7 +358,8 @@ suite.describe('merging conflicts in every part', function()
     end
 
     plugin:updateRecordCount()
-    jess.fs.write(jess.fs.join(order.data, 'Storm.esp'), plugin:save())
+    local done, problem = fs.writeFile(fs.join(order.data, 'Storm.esp'), plugin:save(), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
   end
 
   --- Merges Base, Hills, Valleys, and Storm, each of the plugins' parts by `strategy` when one
@@ -355,15 +378,18 @@ suite.describe('merging conflicts in every part', function()
       end
 
       for _, plugin in { 'Hills', 'Valleys', 'Storm' } do
-        jess.fs.write(
-          jess.fs.join(order.data, `{plugin}.mergedlands.toml`),
-          table.concat(lines, '\n') .. '\n'
+        local done, problem = fs.writeFile(
+          fs.join(order.data, `{plugin}.mergedlands.toml`),
+          table.concat(lines, '\n') .. '\n',
+          { atomic = true, createParents = true }
         )
+        if not done then error(problem, 0) end
       end
     end
 
     local report = merge(order, {})
-    local plugin = assert(jess.fs.readBuffer(report.output :: string))
+    local plugin, problem = fs.readFile(report.output :: string)
+    if not plugin then error(problem, 0) end
     buffer.fill(plugin, DescriptionStart, 0, DescriptionLength)
 
     return `{line(report)}, {bytes.sha256(plugin)}`
@@ -417,10 +443,13 @@ suite.describe('ground at a height of 0', function()
     })
 
     level:updateRecordCount()
-    jess.fs.write(jess.fs.join(order.data, 'Level.esm'), level:save())
+    local done, problem = fs.writeFile(fs.join(order.data, 'Level.esm'), level:save(), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
 
     local report = merge(order, {})
-    local merged = tes3.open(assert(jess.fs.readBuffer(report.output :: string)))
+    local fileBytes, problem = fs.readFile(report.output :: string)
+    if not fileBytes then error(problem, 0) end
+    local merged = tes3.open(fileBytes)
     expect(merged:count()).toBe(2)
 
     local written = assert(tes3.land.read(merged, 1).normals)

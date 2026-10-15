@@ -1,6 +1,7 @@
 --!strict
 -- The plugins the Merged Lands goldens were made from, built with `@tes3` into the data folder
 -- given: Base.esm, then Hills.esp and Valleys.esp, each naming Base.esm as its master.
+local fs = require '@dream/fs'
 local tes3 = require '@tes3'
 
 local Vertices = 65 * 65
@@ -117,11 +118,15 @@ local function worldMap(index: number): number return index % 9 + 1 end
 return function(dataFolder: string)
   local function save(plugin: tes3.Plugin, name: string)
     plugin:updateRecordCount()
-    jess.fs.write(jess.fs.join(dataFolder, name), plugin:save())
+    local done, problem = fs.writeFile(fs.join(dataFolder, name), plugin:save(), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
   end
 
   local function after(name: string): { { name: string, size: number } }
-    return { { name = name, size = assert(jess.fs.size(jess.fs.join(dataFolder, name))) } }
+    local fileStat, problem = fs.stat(fs.join(dataFolder, name))
+    if not fileStat then error(problem, 0) end
+
+    return { { name = name, size = assert(fileStat.size) } }
   end
 
   local base = new 'master'

@@ -212,7 +212,7 @@ local function configurationIn(directory: string): (string?, string?)
   if not names then return nil, `can't look for an openmw.cfg in '{directory}': {message}` end
 
   for _, name in names do
-    if string.lower(name) == 'openmw.cfg' then return jess.fs.join(directory, name), nil end
+    if string.lower(name) == 'openmw.cfg' then return fs.join(directory, name), nil end
   end
 
   return nil, `there's no openmw.cfg in '{directory}'`
@@ -230,8 +230,8 @@ local function configuration(command: Command, environment: string?): (string?, 
       'an OpenMW configuration is required: name the openmw.cfg or its folder with --openmw-cfg (or --config), or in OPENMW_CONFIG'
   end
 
-  if jess.fs.isFile(selected) then return selected, nil end
-  if jess.fs.isDir(selected) then return configurationIn(selected) end
+  if fs.isFile(selected) then return selected, nil end
+  if fs.isDir(selected) then return configurationIn(selected) end
 
   return nil, `'{selected}' isn't an openmw.cfg or a folder holding one`
 end

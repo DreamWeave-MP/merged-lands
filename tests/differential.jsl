@@ -204,11 +204,11 @@ local function outcome(folder: string, seed: number): string
   random = seed * 2654435761 % 4294967296
   if random == 0 then random = 1 end
 
-  local root = jess.fs.join(folder, `seed-{seed}`)
-  if jess.fs.isDir(root) then made(fs.remove(root, { recursive = true })) end
+  local root = fs.join(folder, `seed-{seed}`)
+  if fs.isDir(root) then made(fs.remove(root, { recursive = true })) end
 
   local dataFolder, config, out =
-    jess.fs.join(root, 'data'), jess.fs.join(root, 'config'), jess.fs.join(root, 'out')
+    fs.join(root, 'data'), fs.join(root, 'config'), fs.join(root, 'out')
   for _, directory in { dataFolder, config, out } do
     made(fs.mkdir(directory, { recursive = true }))
   end
@@ -272,20 +272,25 @@ local function outcome(folder: string, seed: number): string
 
     plugin:updateRecordCount()
 
-    local path = jess.fs.join(dataFolder, name)
-    jess.fs.write(path, plugin:save())
-    if position == 0 then masterSize = made(jess.fs.size(path)) end
+    local path = fs.join(dataFolder, name)
+    local succeeded, problem = fs.writeFile(path, plugin:save(), { atomic = true, createParents = true })
+    if not succeeded then error(problem, 0) end
+    local fileStat, problem = fs.stat(path)
+    if not fileStat then error(problem, 0) end
+    if position == 0 then masterSize = made(fileStat.size) end
 
     table.insert(lines, `content={name}`)
 
     if below(3) > 0 then
       local stem = string.match(name, '^[^.]*')
-      jess.fs.write(jess.fs.join(dataFolder, `{stem}.mergedlands.toml`), patch())
+      local succeeded, problem = fs.writeFile(fs.join(dataFolder, `{stem}.mergedlands.toml`), patch(), { atomic = true, createParents = true })
+      if not succeeded then error(problem, 0) end
     end
   end
 
-  local configFile = jess.fs.join(config, 'openmw.cfg')
-  jess.fs.write(configFile, table.concat(lines, '\n') .. '\n')
+  local configFile = fs.join(config, 'openmw.cfg')
+  local succeeded, problem = fs.writeFile(configFile, table.concat(lines, '\n') .. '\n', { atomic = true, createParents = true })
+  if not succeeded then error(problem, 0) end
 
   local options: { [string]: unknown } = {}
 
@@ -298,7 +303,7 @@ local function outcome(folder: string, seed: number): string
   end
 
   local report = options.report :: Report
-  local plugin = made(jess.fs.readBuffer(jess.fs.join(out, OutputName)))
+  local plugin = made(fs.readFile(fs.join(out, OutputName)))
   buffer.fill(plugin, DescriptionStart, 0, DescriptionLength)
   made(fs.remove(root, { recursive = true }))
 

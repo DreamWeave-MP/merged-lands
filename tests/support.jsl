@@ -52,17 +52,17 @@ end
 --- data-local in `out`. `content` is the content list, by default Base, Hills, Valleys.
 local function order(name: string, patches: { string }?, content: { string }?): Order
   local scratch = assert(rawget(_G, 'scratchRoot') :: string?, 'the suite needs a scratchRoot')
-  local root = jess.fs.join(scratch, name)
+  local root = fs.join(scratch, name)
 
   -- A load order starts from nothing, whatever an earlier one of its name left behind.
-  if jess.fs.isDir(root) then io(fs.remove(root, { recursive = true })) end
+  if fs.isDir(root) then io(fs.remove(root, { recursive = true })) end
 
   local made: Order = {
     root = root,
-    data = jess.fs.join(root, 'data'),
-    config = jess.fs.join(root, 'config'),
-    out = jess.fs.join(root, 'out'),
-    file = jess.fs.join(root, 'config/openmw.cfg'),
+    data = fs.join(root, 'data'),
+    config = fs.join(root, 'config'),
+    out = fs.join(root, 'out'),
+    file = fs.join(root, 'config/openmw.cfg'),
   }
 
   for _, directory in { made.data, made.config, made.out } do
@@ -71,16 +71,23 @@ local function order(name: string, patches: { string }?, content: { string }?): 
 
   build(made.data)
   for _, patch in patches or {} do
-    jess.fs.write(jess.fs.join(made.data, patch), assert(jess.fs.read(`{here()}/patches/{patch}`)))
+    local fileText, problem = fs.readFileString(`{here()}/patches/{patch}`)
+    if not fileText then error(problem, 0) end
+    local done, problem = fs.writeFile(fs.join(made.data, patch), fileText, { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
   end
 
-  jess.fs.write(made.file, configuration(made, content or Standard, true))
+  local done, problem = fs.writeFile(made.file, configuration(made, content or Standard, true), { atomic = true, createParents = true })
+  if not done then error(problem, 0) end
   return made
 end
 
 --- The plugin the original wrote for the `golden` scenario.
 local function golden(name: string): buffer
-  return assert(jess.fs.readBuffer(`{here()}/golden/{name}.omwaddon`))
+  local fileBytes, problem = fs.readFile(`{here()}/golden/{name}.omwaddon`)
+  if not fileBytes then error(problem, 0) end
+
+  return fileBytes
 end
 
 --- A plugin's bytes without the description, which says when the plugin was generated.
@@ -95,7 +102,9 @@ end
 --- the time of the run. The length and digest are compared first: a failed comparison of the
 --- bytes themselves can't be reported.
 local function expectOriginal(path: string, name: string)
-  local plugin, original = assert(jess.fs.readBuffer(path)), golden(name)
+  local fileBytes, problem = fs.readFile(path)
+  if not fileBytes then error(problem, 0) end
+  local plugin, original = fileBytes, golden(name)
   expect(buffer.len(plugin)).toBe(buffer.len(original))
 
   local description = buffer.readstring(plugin, DescriptionStart, DescriptionLength)

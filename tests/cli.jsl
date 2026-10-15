@@ -5,6 +5,7 @@
 -- a finished merge held to the original's plugin included. Its messages go to the suite's own
 -- standard error.
 local cli = require '@merged-lands/cli'
+local fs = require '@dream/fs'
 local process = require '@dream/process'
 local support = require './support'
 local test = require '@jess/test'
@@ -301,7 +302,7 @@ suite.describe('configuration', function()
 
     expect(cli.configuration(bare, order.file)).toBe(order.file)
     expect(cli.configuration(bare, order.config)).toBe(order.file)
-    expect(cli.configuration(flagged, jess.fs.join(order.root, 'elsewhere'))).toBe(order.file)
+    expect(cli.configuration(flagged, fs.join(order.root, 'elsewhere'))).toBe(order.file)
   end)
 
   suite.it('is refused when nothing names one, with how to', function()
@@ -319,7 +320,7 @@ suite.describe('configuration', function()
 
   suite.it('is refused when it isn\'t there, wherever it was named', function()
     local order = support.order 'cli-missing'
-    local missing = jess.fs.join(order.root, 'missing')
+    local missing = fs.join(order.root, 'missing')
     local flagged: cli.Command = { action = 'merge', config = missing, options = {} }
     local bare: cli.Command = { action = 'merge', options = {} }
     local unfound = `'{missing}' isn't an openmw.cfg or a folder holding one`
@@ -366,51 +367,57 @@ suite.describe('run', function()
 
   suite.it('returns 8 for a configuration that isn\'t there, and writes nothing', function()
     local order = support.order 'cli-unfound'
-    local missing = jess.fs.join(order.root, 'missing')
+    local missing = fs.join(order.root, 'missing')
 
     expect(cli.run { '--openmw-cfg', missing }).toBe(8)
-    expect(cli.run { '--config', jess.fs.join(missing, 'openmw.cfg') }).toBe(8)
+    expect(cli.run { '--config', fs.join(missing, 'openmw.cfg') }).toBe(8)
     expect(cli.run { '--openmw-cfg', order.data, '--output-file-dir', missing }).toBe(8)
-    expect(jess.fs.exists(missing)).toBe(false)
-    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+    expect(fs.exists(missing)).toBe(false)
+    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
   end)
 
   suite.it('returns 9 when the merge stops, having written no plugin', function()
     local order = support.order('cli-order', nil, { 'Hills.esp', 'Base.esm', 'Valleys.esp' })
 
     expect(cli.run { '--openmw-cfg', order.file }).toBe(9)
-    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
   end)
 
   suite.it('merges the load order into the original\'s plugin, and leaves openmw.cfg alone', function()
     local order = support.order 'cli-default'
-    local before = assert(jess.fs.read(order.file))
+    local before, problem = fs.readFileString(order.file)
+    if not before then error(problem, 0) end
 
     expect(cli.run { '--openmw-cfg', order.file }).toBe(0)
-    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
-    expect(jess.fs.read(order.file)).toBe(before)
+    support.expectOriginal(fs.join(order.out, OutputName), 'default')
+    expect(fs.readFileString(order.file)).toBe(before)
 
     -- Again by the folder, under jess's spelling: the run leaves its own output out of the merge.
     expect(cli.run { '--config', order.config }).toBe(0)
-    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
-    expect(jess.fs.read(order.file)).toBe(before)
-    expect(jess.fs.list(order.config)).toEqual { 'openmw.cfg' }
+    support.expectOriginal(fs.join(order.out, OutputName), 'default')
+    expect(fs.readFileString(order.file)).toBe(before)
+    local listed, problem = fs.list(order.config)
+    if not listed then error(problem, 0) end
+    expect(listed).toEqual { 'openmw.cfg' }
   end)
 
   suite.it('with --activate, adds the plugin to openmw.cfg once, backing it up first', function()
     local order = support.order 'cli-activate'
-    local output = jess.fs.join(order.out, OutputName)
-    local before = assert(jess.fs.read(order.file))
-    local backup = jess.fs.join(order.config, 'openmw.cfg.bak')
+    local output = fs.join(order.out, OutputName)
+    local before, problem = fs.readFileString(order.file)
+    if not before then error(problem, 0) end
+    local backup = fs.join(order.config, 'openmw.cfg.bak')
 
     expect(cli.run { '--openmw-cfg', order.file, '--activate' }).toBe(0)
     support.expectOriginal(output, 'default')
 
-    local enabled = assert(jess.fs.read(order.file))
+    local enabled, problem = fs.readFileString(order.file)
+    if not enabled then error(problem, 0) end
     expect(enabled).toBe(`{before}content={OutputName}\n`)
-    expect(jess.fs.read(backup)).toBe(before)
+    expect(fs.readFileString(backup)).toBe(before)
 
-    local saved = jess.fs.list(order.config)
+    local saved, problem = fs.list(order.config)
+    if not saved then error(problem, 0) end
     table.sort(saved)
     expect(saved).toEqual { 'openmw.cfg', 'openmw.cfg.bak' }
 
@@ -418,18 +425,20 @@ suite.describe('run', function()
     -- writes the same plugin, and neither rewrites openmw.cfg nor backs it up again.
     expect(cli.run { '--activate', '--config', order.config }).toBe(0)
     support.expectOriginal(output, 'default')
-    expect(jess.fs.read(order.file)).toBe(enabled)
-    expect(jess.fs.read(backup)).toBe(before)
+    expect(fs.readFileString(order.file)).toBe(enabled)
+    expect(fs.readFileString(backup)).toBe(before)
 
-    local kept = jess.fs.list(order.config)
+    local kept, problem = fs.list(order.config)
+    if not kept then error(problem, 0) end
     table.sort(kept)
     expect(kept).toEqual { 'openmw.cfg', 'openmw.cfg.bak' }
   end)
 
   suite.it('with --activate, leaves disabled a plugin written where OpenMW can\'t load it', function()
     local order = support.order 'cli-activate-elsewhere'
-    local elsewhere = jess.fs.join(order.root, 'elsewhere')
-    local before = assert(jess.fs.read(order.file))
+    local elsewhere = fs.join(order.root, 'elsewhere')
+    local before, problem = fs.readFileString(order.file)
+    if not before then error(problem, 0) end
 
     expect(cli.run {
       '--openmw-cfg',
@@ -439,21 +448,23 @@ suite.describe('run', function()
       elsewhere,
     }).toBe(0)
 
-    support.expectOriginal(jess.fs.join(elsewhere, OutputName), 'default')
-    expect(jess.fs.read(order.file)).toBe(before)
-    expect(jess.fs.list(order.config)).toEqual { 'openmw.cfg' }
+    support.expectOriginal(fs.join(elsewhere, OutputName), 'default')
+    expect(fs.readFileString(order.file)).toBe(before)
+    local listed, problem = fs.list(order.config)
+    if not listed then error(problem, 0) end
+    expect(listed).toEqual { 'openmw.cfg' }
   end)
 
   suite.it('merges with patch files into the original\'s plugin', function()
     local order = support.order('cli-patched', { 'Hills.mergedlands.toml', 'Valleys.mergedlands.toml' })
 
     expect(cli.run { `--openmw-cfg={order.config}` }).toBe(0)
-    support.expectOriginal(jess.fs.join(order.out, OutputName), 'patched')
+    support.expectOriginal(fs.join(order.out, OutputName), 'patched')
   end)
 
   suite.it('writes the plugin where and as --output-file-dir and --output-file say', function()
     local order = support.order 'cli-elsewhere'
-    local elsewhere = jess.fs.join(order.root, 'elsewhere')
+    local elsewhere = fs.join(order.root, 'elsewhere')
 
     expect(cli.run {
       '--openmw-cfg',
@@ -464,8 +475,8 @@ suite.describe('run', function()
       'Terrain.omwaddon',
     }).toBe(0)
 
-    support.expectOriginal(jess.fs.join(elsewhere, 'Terrain.omwaddon'), 'default')
-    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+    support.expectOriginal(fs.join(elsewhere, 'Terrain.omwaddon'), 'default')
+    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
   end)
 
   suite.it('merges the plugins named, in the order --sort-order gives them', function()
@@ -474,14 +485,14 @@ suite.describe('run', function()
 
     -- As listed, Hills loads before its master, and the merge stops.
     expect(cli.run { '--openmw-cfg', order.file, '--sort-order', 'none', table.unpack(listed) }).toBe(9)
-    expect(jess.fs.exists(jess.fs.join(order.out, OutputName))).toBe(false)
+    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
 
     -- By default the master goes first and the rest by date, which is the order they were built in.
     expect(cli.run { '--openmw-cfg', order.file, table.unpack(listed) }).toBe(0)
-    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+    support.expectOriginal(fs.join(order.out, OutputName), 'default')
 
     expect(cli.run { '--openmw-cfg', order.file, '--sort-order', 'none', table.unpack(support.Standard) }).toBe(0)
-    support.expectOriginal(jess.fs.join(order.out, OutputName), 'default')
+    support.expectOriginal(fs.join(order.out, OutputName), 'default')
   end)
 end)
 

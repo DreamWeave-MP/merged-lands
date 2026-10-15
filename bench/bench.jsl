@@ -285,11 +285,11 @@ end
 -- openmw.cfg reads a relative data folder from its own folder, not from where the run started.
 local root: string = made(fs.absolute(scratch))
 local data, config, out =
-  jess.fs.join(root, 'data'), jess.fs.join(root, 'config'), jess.fs.join(root, 'out')
-local configFile = jess.fs.join(config, 'openmw.cfg')
+  fs.join(root, 'data'), fs.join(root, 'config'), fs.join(root, 'out')
+local configFile = fs.join(config, 'openmw.cfg')
 
 -- The load order starts from nothing, whatever an earlier run left in the folder.
-if jess.fs.isDir(root) then made(fs.remove(root, { recursive = true })) end
+if fs.isDir(root) then made(fs.remove(root, { recursive = true })) end
 
 for _, directory in { data, config, out } do
   made(fs.mkdir(directory, { recursive = true }))
@@ -297,13 +297,16 @@ end
 
 local function save(plugin: tes3.Plugin, name: string)
   plugin:updateRecordCount()
-  jess.fs.write(jess.fs.join(data, name), plugin:save())
+  local done, problem = fs.writeFile(fs.join(data, name), plugin:save(), { atomic = true, createParents = true })
+  if not done then error(problem, 0) end
 end
 
 save(terrainPlugin('master', nil, BaseTextures, Base, 0, 0, 9, 9), 'Base.esm')
 
-local overBase: { Master } =
-  { { name = 'Base.esm', size = made(jess.fs.size(jess.fs.join(data, 'Base.esm'))) } }
+local baseStat, problem = fs.stat(fs.join(data, 'Base.esm'))
+if not baseStat then error(problem, 0) end
+
+local overBase: { Master } = { { name = 'Base.esm', size = made(baseStat.size) } }
 
 -- Each plugin numbers the master's textures its own way, as plugins do.
 local ridgeTextures = { 'Rock', 'Mud', 'Grass', 'Sand', 'Snow', 'Ash', 'Moss' }
@@ -334,13 +337,15 @@ local function arrange(content: { string }, strategy: string?)
     table.insert(lines, `content={name}`)
   end
 
-  jess.fs.write(configFile, table.concat(lines, '\n') .. '\n')
+  local done, problem = fs.writeFile(configFile, table.concat(lines, '\n') .. '\n', { atomic = true, createParents = true })
+  if not done then error(problem, 0) end
 
   for _, name in Everything do
-    local patchFile = jess.fs.join(data, `{string.match(name, '^[^.]*')}.mergedlands.toml`)
+    local patchFile = fs.join(data, `{string.match(name, '^[^.]*')}.mergedlands.toml`)
     if strategy then
-      jess.fs.write(patchFile, patch(strategy))
-    elseif jess.fs.isFile(patchFile) then
+      local done, problem = fs.writeFile(patchFile, patch(strategy), { atomic = true, createParents = true })
+      if not done then error(problem, 0) end
+    elseif fs.isFile(patchFile) then
       made(fs.remove(patchFile))
     end
   end
@@ -355,7 +360,7 @@ end
 
 --- What a merge did: its report, and the digest of its plugin without the time of the run.
 local function outcome(report: Report): string
-  local plugin = made(jess.fs.readBuffer(jess.fs.join(out, OutputName)))
+  local plugin = made(fs.readFile(fs.join(out, OutputName)))
   buffer.fill(plugin, DescriptionStart, 0, DescriptionLength)
 
   return `{report.lands} lands, {report.merged} merged, {report.seams} seams, {report.textures} textures, {bytes.sha256(plugin)}`

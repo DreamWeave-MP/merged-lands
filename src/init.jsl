@@ -54,8 +54,10 @@ SOFTWARE.
 local bytes = require '@dream/bytes'
 local contexts = require '@openmw'
 local data = require '@dream/data'
+local fs = require '@dream/fs'
 local loadOrder = require '@load-order'
 local tes3 = require '@tes3'
+local toml = require '@jess/data/toml'
 
 -- A LAND's heights as the data plane reads them: an i32 a vertex.
 local HeightSpan: dream_data_Kind_i32 = data.i32()
@@ -235,7 +237,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   local function joinRelative(base: string, path: string): string
     if string.match(path, '^[/\\]') or string.match(path, '^%a:[/\\]') then return path end
 
-    return jess.fs.join(base, path)
+    return fs.join(base, path)
   end
 
   -- merged_lands.toml. A missing file is the original's first-run defaults; the original writes
@@ -271,8 +273,8 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   local userConfigDir = openmw.userConfigDir
 
   local function readAppConfig(): AppConfig
-    local path = jess.fs.join(userConfigDir, ConfigName)
-    local text = jess.fs.read(path)
+    local path = fs.join(userConfigDir, ConfigName)
+    local text = fs.readFileString(path)
     if not text then
       return {
         ignorePlugins = table.clone(DefaultIgnored),
@@ -281,7 +283,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
       }
     end
 
-    local raw = jess.toml.decode(text)
+    local raw = toml.decode(text)
     local outputDir =
       optionalString(raw.output_file_dir or raw.default_output_file_dir, 'output_file_dir')
     local fromPaths = raw.ignore_plugins_from_path
@@ -314,7 +316,13 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     or loadOrder.outputDirectory(openmw)
     or error 'merged-lands: openmw.cfg sets no data-local or data folder, so set state.mergedlands.outputDir'
 
-  if not jess.fs.isDir(outputDir) then jess.fs.createDir(outputDir) end
+  if not fs.isDir(outputDir) then
+
+    local done, problem = fs.mkdir(outputDir, { recursive = true })
+
+    if not done then error(problem, 0) end
+
+  end
 
   -- Previous outputs never merge into the next one: the default names, this run's, and the ones
   -- merged_lands.toml says the original wrote here, if they're still around.
@@ -329,7 +337,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     local dir = joinRelative(userConfigDir, generatedDir)
     if string.lower(dir) == string.lower(outputDir) then
       for _, name in appConfig.generatedOutputFiles do
-        if jess.fs.isFile(jess.fs.join(outputDir, name)) then
+        if fs.isFile(fs.join(outputDir, name)) then
           generated[string.lower(name)] = true
         end
       end
@@ -397,7 +405,8 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     for index, name in names do
       position[name] = index
       local path = paths[name]
-      modified[name] = (if path then jess.fs.modified(path) else nil) or 0
+      local stat = if path then fs.stat(path) else nil
+      modified[name] = (if stat then stat.modified else nil) or 0
     end
 
     local sorted = table.clone(names)
@@ -519,11 +528,11 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     local path = openmw:resolve(metaName)
     if not path then return defaultMeta() end
 
-    local text = jess.fs.read(path)
+    local text = fs.readFileString(path)
     if not text then return defaultMeta() end
 
-    -- `jess.toml.decode` throws on text that isn't TOML; the original skips such a file.
-    local decoded, raw = pcall(jess.toml.decode, text)
+    -- `toml.decode` throws on text that isn't TOML; the original skips such a file.
+    local decoded, raw = pcall(toml.decode, text)
     if not decoded then return defaultMeta() end
 
     local version = raw.version
@@ -1451,7 +1460,8 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
   local masters: { { name: string, size: number } } = {}
   for _, name in masterNames do
     local path = masterPaths[name]
-    table.insert(masters, { name = name, size = (if path then jess.fs.size(path) else nil) or 0 })
+    local stat = if path then fs.stat(path) else nil
+    table.insert(masters, { name = name, size = if stat then stat.size else 0 })
   end
 
   local generatedPlugin = tes3.new('plugin', { encoding = encoding })
@@ -1631,13 +1641,14 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     tes3.land.write(generatedPlugin, index, terrain)
   end
 
-  local staleMeta = jess.fs.join(outputDir, stem(outputName) .. '.mergedlands.toml')
-  jess.fs.remove(staleMeta)
+  local staleMeta = fs.join(outputDir, stem(outputName) .. '.mergedlands.toml')
+  fs.remove(staleMeta)
 
-  local output = jess.fs.join(outputDir, outputName)
-  jess.fs.remove(output)
+  local output = fs.join(outputDir, outputName)
+  fs.remove(output)
   generatedPlugin:updateRecordCount()
-  jess.fs.write(output, generatedPlugin:save())
+  local succeeded, problem = fs.writeFile(output, generatedPlugin:save(), { atomic = true, createParents = true })
+  if not succeeded then error(problem, 0) end
 
   local activated = false
   if options.activate then
