@@ -105,3 +105,44 @@ typed sink over a typed slice it was slower (the master alone at 0.92x) and was 
 
 What is left in this package is mostly that loop, 2 ms of the master's 10 ms, the merges
 themselves, and the heights a Resolve averages, whose pairs are too many to keep.
+
+## Which modules are native, and why
+
+Jess compiles to machine code only what is marked (`--!native` on a module, `@native` on one
+function), and every load pays for what is marked. A module carries `--!native` when a row below
+spends its time there and the module is small (12 KB or less); a larger module carries `@native`
+on the functions the row spends its time in, and nothing else.
+
+Measured 2026-10-14 with `jess 0.1.0`, the verified release build of jess `07c38cb` on l3i
+2.0.3, on the i7-10870H, the one-minute load 1.46 and 1.39 at the start of the two
+sessions. In each session the bench ran alternately on this package and on a copy of it with
+every module marked, three fresh runs of `bench/bench.jsl` each, every run's row the median of
+its batches; a column is the median of the three, and a ratio is against the all-marked runs of
+the same session. Which functions a row spends its time in comes from `jess run --profile` of
+that row alone, unmarked. The load cost is a fresh `jess run --package <this package>
+--package-path jpk` of a script that only requires `@merged-lands`, the two sides alternating, the
+median of five each after one warm-up.
+
+| Requiring `@merged-lands` | All marked | This state |
+| --- | ---: | ---: |
+| Unmarked | 0.131 s | 0.119 s |
+| Final | 0.133 s | 0.123 s |
+
+| Row | All marked (ms) | Unmarked / all marked | Final (ms) | Final / all marked |
+| --- | ---: | ---: | ---: | ---: |
+| merge a master of 100 cells alone | 10.52 | **2.315×** | 11.28 | **1.072×** |
+| merge three plugins over it, by load order | 50.49 | **3.686×** | 54.78 | **1.085×** |
+| merge three plugins over it, by Resolve | 202.5 | **3.932×** | 203.8 | 1.006× |
+| merge three plugins over it, by Ignore | 78.68 | **3.418×** | 82.13 | 1.044× |
+
+What carries the directive (every function here is one a row spends its time in, unmarked):
+
+- `init`, by function: `readLand`, `mask`, `overwrite`, `ignore`, `average`, `resolveByte`,
+  `resolve`, `differsOnSides`, `encodeHeights`, `computeNormals`.
+- Unmarked: `cli`, `main`.
+
+`cli` parses arguments once a run and is never marked. The two rows a little over 5% slower than
+all marked (merging a master of 100 cells alone, 1.072x, and three plugins over it, 1.085x) are
+inside this protocol's noise: two all-marked copies of dream-archive, measured the same way, put 10
+of 109 rows more than 5% apart, the 95th percentile at 1.074x. Marking `init` whole would charge
+every run its 59 KB for those.
