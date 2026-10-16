@@ -200,12 +200,12 @@ suite.describe('parse', function()
   end)
 
   suite.it('reads --activate as a switch: what follows it is a plugin, not its value', function()
-    expect(cli.parse { '--activate', 'true' }).toEqual {
+    expect((cli.parse { '--activate', 'true' })).toEqual {
       action = 'merge',
       options = { activate = true, plugins = { 'true' } },
     }
 
-    expect(cli.parse { 'Base.esm', '--activate', '--output-file', 'Terrain.omwaddon' }).toEqual {
+    expect((cli.parse { 'Base.esm', '--activate', '--output-file', 'Terrain.omwaddon' })).toEqual {
       action = 'merge',
       options = { activate = true, outputFile = 'Terrain.omwaddon', plugins = { 'Base.esm' } },
     }
@@ -239,17 +239,17 @@ suite.describe('parse', function()
   end)
 
   suite.it('takes what follows a flag and what follows -- as they are spelled', function()
-    expect(cli.parse { '--', '--vanilla', '--bogus' }).toEqual {
+    expect((cli.parse { '--', '--vanilla', '--bogus' })).toEqual {
       action = 'merge',
       options = { plugins = { '--vanilla', '--bogus' } },
     }
 
-    expect(cli.parse { 'Base.esm', '--', '-Hills.esp' }).toEqual {
+    expect((cli.parse { 'Base.esm', '--', '-Hills.esp' })).toEqual {
       action = 'merge',
       options = { plugins = { 'Base.esm', '-Hills.esp' } },
     }
 
-    expect(cli.parse { '--output-file', '--sort-order', '-' }).toEqual {
+    expect((cli.parse { '--output-file', '--sort-order', '-' })).toEqual {
       action = 'merge',
       options = { outputFile = '--sort-order', plugins = { '-' } },
     }
@@ -257,15 +257,15 @@ suite.describe('parse', function()
 
   suite.it('reads help and version under each spelling, wherever they are', function()
     for _, spelling in { '-h', '--help' } do
-      expect(cli.parse { spelling }).toEqual { action = 'help' }
-      expect(cli.parse { 'Base.esm', '--sort-order', 'none', spelling, '--bogus' }).toEqual {
+      expect((cli.parse { spelling })).toEqual { action = 'help' }
+      expect((cli.parse { 'Base.esm', '--sort-order', 'none', spelling, '--bogus' })).toEqual {
         action = 'help',
       }
     end
 
     for _, spelling in { '-V', '--version' } do
-      expect(cli.parse { spelling }).toEqual { action = 'version' }
-      expect(cli.parse { '--output-file', 'Terrain.omwaddon', spelling }).toEqual {
+      expect((cli.parse { spelling })).toEqual { action = 'version' }
+      expect((cli.parse { '--output-file', 'Terrain.omwaddon', spelling })).toEqual {
         action = 'version',
       }
     end
@@ -300,8 +300,8 @@ suite.describe('configuration', function()
     local byFile: cli.Command = { action = 'merge', config = order.file, options = {} }
     local byFolder: cli.Command = { action = 'merge', config = order.config, options = {} }
 
-    expect(cli.configuration(byFile, nil)).toBe(order.file)
-    expect(cli.configuration(byFolder, nil)).toBe(order.file)
+    expect((cli.configuration(byFile, nil))).toBe(order.file)
+    expect((cli.configuration(byFolder, nil))).toBe(order.file)
   end)
 
   suite.it('is the one OPENMW_CONFIG names when no flag names one', function()
@@ -309,9 +309,9 @@ suite.describe('configuration', function()
     local bare: cli.Command = { action = 'merge', options = {} }
     local flagged: cli.Command = { action = 'merge', config = order.file, options = {} }
 
-    expect(cli.configuration(bare, order.file)).toBe(order.file)
-    expect(cli.configuration(bare, order.config)).toBe(order.file)
-    expect(cli.configuration(flagged, fs.join(order.root, 'elsewhere'))).toBe(order.file)
+    expect((cli.configuration(bare, order.file))).toBe(order.file)
+    expect((cli.configuration(bare, order.config))).toBe(order.file)
+    expect((cli.configuration(flagged, fs.join(order.root, 'elsewhere')))).toBe(order.file)
   end)
 
   suite.it('is refused when nothing names one, with how to', function()

@@ -93,6 +93,7 @@ type LandscapeTexture = { flags: string, id: string, index: number, fileName: st
 
 -- What `tes3.land.write` is handed for a merged cell: `false` leaves the world map out.
 type Terrain = {
+  grid: { number }?,
   flags: number?,
   heightOffset: number?,
   heights: buffer?,
@@ -532,7 +533,7 @@ return function(state: { [string]: unknown }?, context: contexts.Context?)
     if not text then return defaultMeta() end
 
     -- `toml.decode` throws on text that isn't TOML; the original skips such a file.
-    local decoded, raw = pcall(toml.decode, text)
+    local decoded, raw = pcall(toml.decode, text, nil)
     if not decoded then return defaultMeta() end
 
     local version = raw.version

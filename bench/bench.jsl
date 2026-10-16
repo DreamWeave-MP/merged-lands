@@ -54,6 +54,7 @@ type Ground = {
 }
 
 type Terrain = {
+  grid: { number }?,
   flags: number,
   heightOffset: number,
   heights: buffer,
