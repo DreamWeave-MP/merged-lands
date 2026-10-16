@@ -10,6 +10,15 @@ local process = require '@dream/process'
 local support = require './support'
 local test = require '@jess/test'
 
+--- The text of the file at `path`, raising the read's own message when there is none.
+local function readText(path: string): string
+  local text, problem = fs.readFileString(path)
+  if not text then error(problem, 0) end
+
+  return text
+end
+
+
 local expect = test.expect
 local suite = test.new()
 
@@ -390,12 +399,12 @@ suite.describe('run', function()
 
     expect(cli.run { '--openmw-cfg', order.file }).toBe(0)
     support.expectOriginal(fs.join(order.out, OutputName), 'default')
-    expect(fs.readFileString(order.file)).toBe(before)
+    expect(readText(order.file)).toBe(before)
 
     -- Again by the folder, under jess's spelling: the run leaves its own output out of the merge.
     expect(cli.run { '--config', order.config }).toBe(0)
     support.expectOriginal(fs.join(order.out, OutputName), 'default')
-    expect(fs.readFileString(order.file)).toBe(before)
+    expect(readText(order.file)).toBe(before)
     local listed, problem = fs.list(order.config)
     if not listed then error(problem, 0) end
     expect(listed).toEqual { 'openmw.cfg' }
@@ -414,7 +423,7 @@ suite.describe('run', function()
     local enabled, problem = fs.readFileString(order.file)
     if not enabled then error(problem, 0) end
     expect(enabled).toBe(`{before}content={OutputName}\n`)
-    expect(fs.readFileString(backup)).toBe(before)
+    expect(readText(backup)).toBe(before)
 
     local saved, problem = fs.list(order.config)
     if not saved then error(problem, 0) end
@@ -425,8 +434,8 @@ suite.describe('run', function()
     -- writes the same plugin, and neither rewrites openmw.cfg nor backs it up again.
     expect(cli.run { '--activate', '--config', order.config }).toBe(0)
     support.expectOriginal(output, 'default')
-    expect(fs.readFileString(order.file)).toBe(enabled)
-    expect(fs.readFileString(backup)).toBe(before)
+    expect(readText(order.file)).toBe(enabled)
+    expect(readText(backup)).toBe(before)
 
     local kept, problem = fs.list(order.config)
     if not kept then error(problem, 0) end
@@ -449,7 +458,7 @@ suite.describe('run', function()
     }).toBe(0)
 
     support.expectOriginal(fs.join(elsewhere, OutputName), 'default')
-    expect(fs.readFileString(order.file)).toBe(before)
+    expect(readText(order.file)).toBe(before)
     local listed, problem = fs.list(order.config)
     if not listed then error(problem, 0) end
     expect(listed).toEqual { 'openmw.cfg' }
