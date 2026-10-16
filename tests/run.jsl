@@ -97,7 +97,7 @@ suite.describe('merging', function()
     support.expectOriginal(fs.join(order.out, OutputName), 'patched')
     local fileText, problem = fs.readFileString(order.file)
     if not fileText then error(problem, 0) end
-    expect(string.find(fileText, 'Merged Lands', 1, true)).toBeNil()
+    expect((string.find(fileText, 'Merged Lands', 1, true))).toBeNil()
   end)
 
   suite.it('writes elsewhere without enabling what OpenMW cannot load', function()
@@ -112,11 +112,11 @@ suite.describe('merging', function()
 
     expect(report.activated).toBe(false)
     expect(report.output).toBe(fs.join(elsewhere, 'Terrain.omwaddon'))
-    expect(fs.isFile(fs.join(elsewhere, 'Terrain.omwaddon'))).toBe(true)
-    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
+    expect((fs.isFile(fs.join(elsewhere, 'Terrain.omwaddon')))).toBe(true)
+    expect((fs.exists(fs.join(order.out, OutputName)))).toBe(false)
     local fileText, problem = fs.readFileString(order.file)
     if not fileText then error(problem, 0) end
-    expect(string.find(fileText, 'Terrain', 1, true)).toBeNil()
+    expect((string.find(fileText, 'Terrain', 1, true))).toBeNil()
   end)
 
   suite.it('writes to the first data folder without data-local', function()
@@ -126,8 +126,8 @@ suite.describe('merging', function()
 
     local report = merge(order, {})
     expect(report.output).toBe(fs.join(order.data, OutputName))
-    expect(fs.isFile(fs.join(order.data, OutputName))).toBe(true)
-    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
+    expect((fs.isFile(fs.join(order.data, OutputName)))).toBe(true)
+    expect((fs.exists(fs.join(order.out, OutputName)))).toBe(false)
   end)
 
   suite.it('stops on a master that loads later', function()
@@ -136,7 +136,7 @@ suite.describe('merging', function()
 
     expect(function() mergedLands({ mergedlands = options }, openmw.new(order.file)) end).toThrow 'Hills.esp declares master Base.esm but loads before it'
     expect(options.report).toBeNil()
-    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
+    expect((fs.exists(fs.join(order.out, OutputName)))).toBe(false)
   end)
 
   suite.it('needs a Context', function()
@@ -223,7 +223,7 @@ suite.describe('reading the load order', function()
     if not done then error(problem, 0) end
 
     expect(function() merge(order, {}) end).toThrow 'merged-lands: Deleted.esp adds the deleted LTEX Gone, as the original won\'t'
-    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
+    expect((fs.exists(fs.join(order.out, OutputName)))).toBe(false)
   end)
 end)
 

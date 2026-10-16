@@ -381,15 +381,15 @@ suite.describe('run', function()
     expect(cli.run { '--openmw-cfg', missing }).toBe(8)
     expect(cli.run { '--config', fs.join(missing, 'openmw.cfg') }).toBe(8)
     expect(cli.run { '--openmw-cfg', order.data, '--output-file-dir', missing }).toBe(8)
-    expect(fs.exists(missing)).toBe(false)
-    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
+    expect((fs.exists(missing))).toBe(false)
+    expect((fs.exists(fs.join(order.out, OutputName)))).toBe(false)
   end)
 
   suite.it('returns 9 when the merge stops, having written no plugin', function()
     local order = support.order('cli-order', nil, { 'Hills.esp', 'Base.esm', 'Valleys.esp' })
 
     expect(cli.run { '--openmw-cfg', order.file }).toBe(9)
-    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
+    expect((fs.exists(fs.join(order.out, OutputName)))).toBe(false)
   end)
 
   suite.it('merges the load order into the original\'s plugin, and leaves openmw.cfg alone', function()
@@ -485,7 +485,7 @@ suite.describe('run', function()
     }).toBe(0)
 
     support.expectOriginal(fs.join(elsewhere, 'Terrain.omwaddon'), 'default')
-    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
+    expect((fs.exists(fs.join(order.out, OutputName)))).toBe(false)
   end)
 
   suite.it('merges the plugins named, in the order --sort-order gives them', function()
@@ -494,7 +494,7 @@ suite.describe('run', function()
 
     -- As listed, Hills loads before its master, and the merge stops.
     expect(cli.run { '--openmw-cfg', order.file, '--sort-order', 'none', table.unpack(listed) }).toBe(9)
-    expect(fs.exists(fs.join(order.out, OutputName))).toBe(false)
+    expect((fs.exists(fs.join(order.out, OutputName)))).toBe(false)
 
     -- By default the master goes first and the rest by date, which is the order they were built in.
     expect(cli.run { '--openmw-cfg', order.file, table.unpack(listed) }).toBe(0)
