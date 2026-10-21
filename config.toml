@@ -1,0 +1,40 @@
+base_url = "https://dreamweave-mp.github.io/merged-lands"
+title = "merged-lands"
+description = "Merges the landscape of a load order into one plugin, heights and textures reconciled the way OpenMW reads them, as a Jess command in Luau."
+compile_sass = true
+build_search_index = true
+generate_feeds = true
+feed_filenames = ["atom.xml"]
+taxonomies = [{ name = "tags", feed = false }]
+
+[search]
+index_format = "fuse_json"
+include_title = true
+include_description = true
+include_content = true
+truncate_content_length = 400
+
+[markdown]
+highlighting = { theme = "dracula-soft" }
+insert_anchor_links = "right"
+smart_punctuation = true
+
+[slugify]
+paths = "safe"
+
+[link_checker]
+skip_prefixes = ["https://github.com/", "https://www.nexusmods.com/"]
+
+[extra]
+github_username = "DreamWeave-MP"
+github_project = "merged-lands"
+logo_text = "merged-lands"
+palette = "grove"
+menu_items = [
+    { name = "merged-lands", url = "@/home/index.md" },
+    { name = "Network", url = "@/network.md" },
+]
+
+[extra.comments]
+enabled = false
+category = "General"
