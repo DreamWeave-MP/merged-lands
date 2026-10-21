@@ -8,9 +8,9 @@
 local bytes = require '@dream/bytes'
 local fs = require '@dream/fs'
 local mergedLands = require '@merged-lands'
-local openmw = require '@openmw'
+local openmw = require '@openmw-install'
 local support = require './support'
-local tes3 = require '@tes3'
+local tes3 = require '@esm'
 local test = require '@jess/test'
 
 local expect = test.expect

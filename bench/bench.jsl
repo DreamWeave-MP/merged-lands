@@ -14,8 +14,8 @@
 local bytes = require '@dream/bytes'
 local fs = require '@dream/fs'
 local mergedLands = require '@merged-lands'
-local openmw = require '@openmw'
-local tes3 = require '@tes3'
+local openmw = require '@openmw-install'
+local tes3 = require '@esm'
 
 -- A build without the verified toolchain runs Luau slower than a release does, so a number from
 -- one says nothing about what ships.

@@ -19,7 +19,7 @@ jess run --package jpk/merged-lands --package-path jpk \
 ```
 
 A merge's time is not all this package's. Reading a LAND as buffers and writing one back are
-`@tes3`'s, opening the plugins is `@load-order`'s, and they were held fixed here: of the 10 ms
+`@esm`'s, opening the plugins is `@openmw-content`'s, and they were held fixed here: of the 10 ms
 the master alone now takes, about 3 ms is `tes3.land.read`, and of the 49 ms by load order about
 8 ms is `tes3.land.read` and 10 ms `tes3.land.write`.
 

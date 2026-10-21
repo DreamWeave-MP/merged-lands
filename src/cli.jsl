@@ -44,7 +44,7 @@ one that isn't there), 9 when the merge raised. Messages go to standard error as
 
 local fs = require '@dream/fs'
 local mergedLands = require '@merged-lands'
-local openmw = require '@openmw'
+local openmw = require '@openmw-install'
 local process = require '@dream/process'
 
 --- `state.mergedlands`, as far as the command line sets it.

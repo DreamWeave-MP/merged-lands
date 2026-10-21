@@ -1,7 +1,7 @@
 --!strict
 --[[
 @merged-lands: Merged Lands 0.2.0, as a function of (state, openmw), openmw
-being the load order's config from `@openmw`'s `new`.
+being the load order's config from `@openmw-install`'s `new`.
 
 It merges the load order's LAND records the way Merged Lands does in its default OpenMW mode: each
 plugin's terrain is measured against the terrain loaded before it, the vertices it changed win in
@@ -52,11 +52,11 @@ SOFTWARE.
 ]]
 
 local bytes = require '@dream/bytes'
-local contexts = require '@openmw'
+local contexts = require '@openmw-install'
 local data = require '@dream/data'
 local fs = require '@dream/fs'
-local loadOrder = require '@load-order'
-local tes3 = require '@tes3'
+local loadOrder = require '@openmw-content'
+local tes3 = require '@esm'
 local toml = require '@jess/data/toml'
 
 -- A LAND's heights as the data plane reads them: an i32 a vertex.
@@ -88,7 +88,7 @@ type Source = {
 -- A LAND record: its plugin by its place in the sources, and its number in that plugin.
 type Contribution = { source: number, index: number }
 
--- An LTEX record as `@tes3` decodes one.
+-- An LTEX record as `@esm` decodes one.
 type LandscapeTexture = { flags: string, id: string, index: number, fileName: string }
 
 -- What `tes3.land.write` is handed for a merged cell: `false` leaves the world map out.

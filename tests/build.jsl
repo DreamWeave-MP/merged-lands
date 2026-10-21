@@ -1,8 +1,8 @@
 --!strict
--- The plugins the Merged Lands goldens were made from, built with `@tes3` into the data folder
+-- The plugins the Merged Lands goldens were made from, built with `@esm` into the data folder
 -- given: Base.esm, then Hills.esp and Valleys.esp, each naming Base.esm as its master.
 local fs = require '@dream/fs'
-local tes3 = require '@tes3'
+local tes3 = require '@esm'
 
 local Vertices = 65 * 65
 

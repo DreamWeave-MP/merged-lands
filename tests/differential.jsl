@@ -13,8 +13,8 @@
 local bytes = require '@dream/bytes'
 local fs = require '@dream/fs'
 local mergedLands = require '@merged-lands'
-local openmw = require '@openmw'
-local tes3 = require '@tes3'
+local openmw = require '@openmw-install'
+local tes3 = require '@esm'
 
 local scratch: string?, firstSeed: string?, lastSeed: string? = ...
 
