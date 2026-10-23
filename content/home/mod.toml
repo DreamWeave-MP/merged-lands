@@ -19,3 +19,11 @@ jess = "org.dreamweave.merged-lands"
 version = "0.1.0"
 date = 2026-10-21
 summary = "First release published as a DreamWeave project."
+
+[[releases]]
+version = "0.1.1"
+date = 2026-10-23
+summary = "Merged Lands finds OpenMW's own configuration when none is named, as the original does."
+added = [
+    "With neither `--config` nor OPENMW_CONFIG, the openmw.cfg in the folder OpenMW keeps its own in on this platform: Documents\\My Games\\OpenMW on Windows, wherever Documents was moved, Library/Preferences/openmw on macOS, and the XDG config folder elsewhere. Its `?userconfig?` and `?userdata?` are OpenMW's own folders. Needs jess 0.2.1 or later.",
+]

@@ -2,7 +2,7 @@ manifest_version = 1
 
 [package]
 id = "org.dreamweave.merged-lands"
-version = "0.1.0"
+version = "0.1.1"
 jess_api = "1"
 default_target = "merged-lands"
 include = ["src", "tests"]
