@@ -4,7 +4,7 @@
 
   run(argv) -> exit status
   parse(argv) -> (command, nil) | (nil, message)
-  configuration(command, environment) -> (openmw.cfg, nil) | (nil, message)
+  configuration(command, environment, own) -> (openmw.cfg, nil) | (nil, message)
 
   merged-lands --openmw-cfg <path> [--output-file <name>] [--output-file-dir <dir>]
                [--sort-order default|none] [--activate] [<plugin>...]
@@ -18,9 +18,9 @@ the original, a flag takes its value from the next argument or after an `=`, can
 and `--` ends the flags.
 
 The original names OpenMW's configuration with `--openmw-cfg`, a file or the folder holding it,
-and finds OpenMW's own when it isn't given. Finding it is what this can't do, so the configuration
-has to be named: by `--openmw-cfg`, by `--config`, which is the same flag as jess's other tools
-spell it, or by the OPENMW_CONFIG environment variable when neither is given.
+and finds OpenMW's own when it isn't given. So does this: `--openmw-cfg`, or `--config`, which is
+the same flag as jess's other tools spell it, else the OPENMW_CONFIG environment variable, else
+the openmw.cfg in the folder OpenMW keeps its own in on this platform.
 
 The original's other flags are for what the port doesn't do, and each is refused by name:
 `--merged-lands-dir`, `--log-file`, and `--log-level` (no Conflicts images and no log are written,
@@ -35,7 +35,8 @@ switch: it takes no value, and is given once.
 
 `parse` reads an argument list into the command it names without running it, or says what it
 couldn't read. `configuration` is the openmw.cfg a command reads, `environment` being
-OPENMW_CONFIG's value. What a merge prints is the tool's own line for it.
+OPENMW_CONFIG's value and `own` OpenMW's own configuration folder. What a merge prints is the
+tool's own line for it.
 
 Exit statuses: 0 when the command did what it was asked, 8 when the command line can't be used (an
 unknown or unported flag, a missing or repeated value, a value for a switch, no configuration, or
@@ -45,6 +46,7 @@ one that isn't there), 9 when the merge raised. Messages go to standard error as
 local fs = require '@dream/fs'
 local mergedLands = require '@merged-lands'
 local openmw = require '@openmw-install'
+local openmwConfig = require '@openmw-config'
 local process = require '@dream/process'
 
 --- `state.mergedlands`, as far as the command line sets it.
@@ -78,7 +80,8 @@ anyway, with the LTEX records it uses, as one plugin that belongs last in the lo
 
   <plugin>...              merge these plugins, by name, instead of openmw.cfg's content
   --openmw-cfg <path>      the openmw.cfg to read, or the folder holding it; --config is the
-                           same, and OPENMW_CONFIG names it when neither is given
+                           same, OPENMW_CONFIG names it when neither is given, and without
+                           any of them it is OpenMW's own
   --output-file <name>     the plugin's file name (default Merged Lands.omwaddon)
   --output-file-dir <dir>  where to write it (default merged_lands.toml's output_file_dir, else
                            data-local, else the first data folder)
@@ -219,11 +222,16 @@ local function configurationIn(directory: string): (string?, string?)
 end
 
 --- The openmw.cfg `command` reads: the one its flag names, else the one `environment` does, that
---- being OPENMW_CONFIG's value; either may be the file or the folder holding it. Nil and why when
---- neither names one that's there.
-local function configuration(command: Command, environment: string?): (string?, string?)
+--- being OPENMW_CONFIG's value, either the file or the folder holding it; else the one in `own`,
+--- OpenMW's own configuration folder. Nil and why when none names one that's there.
+local function configuration(command: Command, environment: string?, own: string?): (string?, string?)
   local selected = command.config
   if not selected and environment ~= '' then selected = environment end
+
+  if not selected and own and own ~= '' then
+    local found = configurationIn(own)
+    if found then return found, nil end
+  end
 
   if not selected then
     return nil,
@@ -247,7 +255,7 @@ end
 
 local function merge(path: string, options: Options)
   local state: { [string]: unknown } = { mergedlands = options }
-  mergedLands(state, openmw.new(path))
+  mergedLands(state, openmw.new(path, { tokens = openmwConfig.userFolders() }))
 end
 
 local function run(argv: { string }): number
@@ -266,7 +274,8 @@ local function run(argv: { string }): number
 
   -- A configuration a flag names is read whatever the environment says.
   local environment = if command.config then nil else process.env 'OPENMW_CONFIG'
-  local path, missing = configuration(command, environment)
+  local own = openmwConfig.userFolders().userConfig
+  local path, missing = configuration(command, environment, own)
   if not path then return usage(missing :: string) end
 
   -- The merge raises where the original stops with an error: an openmw.cfg that can't be read, a

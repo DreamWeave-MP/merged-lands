@@ -6,7 +6,6 @@
 -- standard error.
 local cli = require '@merged-lands/cli'
 local fs = require '@dream/fs'
-local process = require '@dream/process'
 local support = require './support'
 local test = require '@jess/test'
 
@@ -327,6 +326,21 @@ suite.describe('configuration', function()
     expect(emptyMessage).toBe(NoConfiguration)
   end)
 
+  -- A bare command line is never run here: it would merge the machine's own load order, which is
+  -- why `configuration` takes OPENMW_CONFIG's value and OpenMW's own folder instead of reading them.
+  suite.it('is OpenMW\'s own when nothing else names one, and refused when that has none', function()
+    local order = support.order 'cli-own'
+    local bare: cli.Command = { action = 'merge', options = {} }
+
+    expect((cli.configuration(bare, nil, order.config))).toBe(order.file)
+    expect((cli.configuration(bare, '', order.config))).toBe(order.file)
+    expect((cli.configuration(bare, order.file, order.data))).toBe(order.file)
+
+    local path, message = cli.configuration(bare, nil, order.data)
+    expect(path).toBeNil()
+    expect(message).toBe(NoConfiguration)
+  end)
+
   suite.it('is refused when it isn\'t there, wherever it was named', function()
     local order = support.order 'cli-missing'
     local missing = fs.join(order.root, 'missing')
@@ -363,16 +377,6 @@ suite.describe('run', function()
     end
   end)
 
-  suite.it('returns 8 when nothing names a configuration', function()
-    local bare: cli.Command = { action = 'merge', options = {} }
-    expect(select(2, cli.configuration(bare, nil))).toBe(NoConfiguration)
-
-    -- With OPENMW_CONFIG set, a bare command line would merge that load order, so it isn't run.
-    if process.env 'OPENMW_CONFIG' then return end
-
-    expect(cli.run {}).toBe(8)
-    expect(cli.run { '--sort-order', 'none', 'Base.esm' }).toBe(8)
-  end)
 
   suite.it('returns 8 for a configuration that isn\'t there, and writes nothing', function()
     local order = support.order 'cli-unfound'
