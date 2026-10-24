@@ -1,5 +1,5 @@
 {
-  "schema_version": "3",
+  "schema_version": "4",
   "document": "lock",
   "project": "79933d87-68dd-4476-945a-906e5a6f4f44",
   "note": "Written by CI when a release tag is pushed: what each published release's archive contains. Do not edit.",
@@ -23,6 +23,52 @@
             "content_digest": "a8a36dc67c4069a1c4ef2b6408733d6f3db2bb916c0e4e31e25e7251b6cc2f4a",
             "dependencies": {
               "org.dreamweave.esm": "0.1",
+              "org.dreamweave.openmw-content": "0.1",
+              "org.dreamweave.openmw-install": "0.1"
+            }
+          }
+        }
+      ],
+      "runtimes": {},
+      "platforms": [],
+      "provides": [],
+      "relationships": [],
+      "components": [
+        {
+          "id": "main",
+          "name": "merged-lands",
+          "path": ".",
+          "required": true,
+          "default": true,
+          "requires": [],
+          "conflicts": [],
+          "suggested_with": []
+        }
+      ],
+      "groups": [],
+      "extensions": {},
+      "critical_extensions": []
+    },
+    {
+      "version": "0.1.1",
+      "locked_from": "600d0ef8421fabaa690c329c9b995724e06326ea",
+      "artifacts": [
+        {
+          "id": "jpk",
+          "format": "jpk",
+          "filename": "org.dreamweave.merged-lands-0.1.1.jpk",
+          "media_type": "application/vnd.jess.jpk",
+          "size": 118745,
+          "digests": {
+            "sha256": "85e708eea077ea21f64a46b2d65585aeddcf85638a12439be6dd87c2a8cf9a54"
+          },
+          "jess": {
+            "package": "org.dreamweave.merged-lands",
+            "jess_api": "1",
+            "content_digest": "74d7bba64e9aee7ec890d0b2cfa7d3c2118330f678fd4a05c002fe47e42c57ad",
+            "dependencies": {
+              "org.dreamweave.esm": "0.1",
+              "org.dreamweave.openmw-config": "4.2",
               "org.dreamweave.openmw-content": "0.1",
               "org.dreamweave.openmw-install": "0.1"
             }
